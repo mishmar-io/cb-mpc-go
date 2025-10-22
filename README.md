@@ -1,1 +1,93 @@
 # cb-mpc-go
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/coinbase/cb-mpc-go.svg)](https://pkg.go.dev/github.com/coinbase/cb-mpc-go)
+
+A production-focused Go wrapper around [Coinbase's cb-mpc](https://github.com/coinbase/cb-mpc) multi-party computation (MPC) library. The goal of this repository is to surface a safe, ergonomic, and well-structured Go API while building directly from the C++ source tree. All tooling runs natively by default, and you can opt into a reproducible Docker environment by exporting `CBMPC_USE_DOCKER=1` (the same mode used by CI).
+
+## Repository layout
+
+- `cb-mpc`: git submodule tracking the upstream C++ library.
+- `pkg/cbmpc`: public Go API surface with MPC protocol implementations.
+- `pkg/cbmpc/internal/backend`: CGO bridge to the C++ cb-mpc library.
+- `examples/`: example programs demonstrating MPC protocols (agree-random-2p, agree-random-mp, etc.).
+- `Dockerfile`: development container image that matches the CI environment.
+- `.github/workflows/`: GitHub Actions pipelines for linting and testing pull requests.
+
+## Getting started
+
+1. Install prerequisites:
+
+   ```bash
+   brew install git-lfs            # or use your distro package manager
+   git lfs install
+   ```
+
+   The upstream cb-mpc submodule stores several assets in Git LFS; without these commands `git submodule update` will emit warnings and leave large binaries out of sync.
+
+2. Clone the repository and initialize submodules:
+
+   ```bash
+   git clone git@github.com:coinbase/cb-mpc-go.git
+   cd cb-mpc-go
+   git submodule update --init --recursive
+   ```
+
+  The `cb-mpc` submodule is pinned to a specific commit SHA. When contributing, keep it at the recorded revision unless you are preparing an intentional bump (see `docs/adr/0005-submodule-pin-policy.md`).
+
+   Alternatively run `scripts/bootstrap.sh` to automate LFS setup, submodule sync, tool downloads, and the initial builds.
+
+3. Build the cb-mpc C++ static library from source without installing it system-wide:
+
+   ```bash
+   make build-cbmpc
+   ```
+
+   The examples below run natively. If you prefer the Linux dev container, prefix commands with `CBMPC_USE_DOCKER=1` (Docker must be available and running).
+
+   Native builds write artefacts under `build/openssl-host` and `build/cb-mpc-host`. When running with `CBMPC_USE_DOCKER=1`, the helper scripts isolate the container builds under `build/openssl-docker` and `build/cb-mpc-docker` to avoid CMake cache conflicts.
+
+4. Run the (currently minimal) Go test suite (the target depends on `make build-cbmpc` to ensure the native library is present):
+
+   ```bash
+   make test
+   ```
+
+   On a clean macOS install the helper script automatically downloads Go 1.25.2 into `build/go-host`. Set `CBMPC_USE_DOCKER=1` if you prefer to run the tests inside the dev container, which will keep its own toolchain under `build/go-docker`.
+
+5. Run Go linters:
+
+   ```bash
+   make lint
+   ```
+
+   A matching `golangci-lint` v1.64.8 binary is installed into `build/bin-host` (or `build/bin-docker` in container mode) on demand.
+
+## Development workflow
+
+- `make bootstrap` runs Git LFS setup, syncs submodules, and performs the initial cb-mpc build.
+- `make lint-fix` formats and auto-fixes lint findings when supported by `golangci-lint`.
+- `make vuln` executes `govulncheck ./...` with the pinned toolchain, while `make sec` wraps `gosec` with exclusions for generated cgo shims. Run `make tools` once to install the pinned security tools into `build/tools/bin`.
+- `make tidy-check` ensures `go.mod` and `go.sum` stay clean by running `go mod tidy` and failing on diffs.
+- `make clean` removes all generated build artefacts, including the local cb-mpc build directory.
+- Tool shims bootstrap pinned Go and `golangci-lint` toolchains automatically and keep separate caches per environment flavour (`*-host` vs `*-docker`) so you can switch between native macOS and Linux container runs without manual cleanup. Export `CBMPC_USE_DOCKER=1` to run the same workflow inside the dev container.
+- The `Dockerfile` mirrors the tooling used in CI, allowing local validation via `docker build .`.
+
+## Documentation
+
+- View docs locally with:
+
+  ```bash
+  make doc
+  # then open http://localhost:6060/github.com/coinbase/cb-mpc-go
+  ```
+
+- Hosted API docs are available on pkg.go.dev: https://pkg.go.dev/github.com/coinbase/cb-mpc-go
+
+## Continuous integration
+
+GitHub Actions workflows invoke the same Make targets (`make lint`, `make vuln`, `make sec`, `make test`) on every pull request with `CBMPC_USE_DOCKER=1`, covering a Linux container matrix across amd64 and arm64 plus a native macOS host job so both environments stay healthy.
+
+## Next steps
+
+- Model higher-level Go APIs that expose safe MPC workflows
+- Expand testing (unit and integration) around the bindings once available

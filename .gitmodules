@@ -1,0 +1,4 @@
+[submodule "cb-mpc"]
+	path = cb-mpc
+	url = https://github.com/coinbase/cb-mpc
+	branch = master

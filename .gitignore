@@ -1,0 +1,16 @@
+# Build artifacts
+/build/
+/dist/
+*.log
+
+# Go build cache
+bin/
+
+# macOS noise
+.DS_Store
+
+# Example build artifacts and generated files
+examples/**/build/
+examples/**/certs/*.pem
+examples/tlsnet/cmd/gen-certs/examples/
+
