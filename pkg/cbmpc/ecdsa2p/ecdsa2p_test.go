@@ -13,7 +13,6 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	btcecdsa "github.com/btcsuite/btcd/btcec/v2/ecdsa"
-
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsa2p"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"

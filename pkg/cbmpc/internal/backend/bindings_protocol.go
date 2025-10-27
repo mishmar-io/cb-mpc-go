@@ -1,5 +1,6 @@
 //go:build cgo && !windows
 
+//nolint:gocritic // CGO call wrappers trigger dupSubExpr false positives
 package backend
 
 /*
@@ -184,7 +185,7 @@ func ECDSA2PSignWithGlobalAbort(cj unsafe.Pointer, key ECDSA2PKey, sidIn, msg []
 	var sidOut, sigOut C.cmem_t
 	rc := C.cbmpc_ecdsa2p_sign_with_global_abort((*C.cbmpc_job2p)(cj), sidMem, key, msgMem, &sidOut, &sigOut)
 	if rc != 0 {
-		if C.uint(rc) == C.uint(E_ECDSA_2P_BIT_LEAK) {
+		if C.uint(rc) == C.uint(EECDSA2PBitLeak) {
 			return nil, nil, ErrBitLeak
 		}
 		return nil, nil, formatNativeErr("ecdsa2p_sign_with_global_abort", rc)
@@ -216,7 +217,7 @@ func ECDSA2PSignWithGlobalAbortBatch(cj unsafe.Pointer, key ECDSA2PKey, sidIn []
 	var sigsOut C.cmems_t
 	rc := C.cbmpc_ecdsa2p_sign_with_global_abort_batch((*C.cbmpc_job2p)(cj), sidMem, key, msgsMem, &sidOut, &sigsOut)
 	if rc != 0 {
-		if C.uint(rc) == C.uint(E_ECDSA_2P_BIT_LEAK) {
+		if C.uint(rc) == C.uint(EECDSA2PBitLeak) {
 			return nil, nil, ErrBitLeak
 		}
 		return nil, nil, formatNativeErr("ecdsa2p_sign_with_global_abort_batch", rc)
@@ -532,9 +533,11 @@ func PVEBatchDecrypt(k KEM, dkHandle unsafe.Pointer, ekBytes, pveCT, label []byt
 // This allows the backend to use the public KEM interface without importing it everywhere.
 type KEM = kem.KEM
 
+// export name used by C++ code: go_ffi_kem_encap
+//
 //export go_ffi_kem_encap
-func go_ffi_kem_encap(ek_bytes C.cmem_t, rho C.cmem_t, kem_ct_out *C.cmem_t, kem_ss_out *C.cmem_t) C.int {
-	if kem_ct_out == nil || kem_ss_out == nil {
+func go_ffi_kem_encap(ekBytes C.cmem_t, rho C.cmem_t, kemCTOut *C.cmem_t, kemSSOut *C.cmem_t) C.int {
+	if kemCTOut == nil || kemSSOut == nil {
 		return C.int(C.CBMPC_E_BADARG)
 	}
 
@@ -553,7 +556,7 @@ func go_ffi_kem_encap(ek_bytes C.cmem_t, rho C.cmem_t, kem_ct_out *C.cmem_t, kem
 	}
 
 	// Convert inputs to Go
-	ek := C.GoBytes(unsafe.Pointer(ek_bytes.data), ek_bytes.size)
+	ek := C.GoBytes(unsafe.Pointer(ekBytes.data), ekBytes.size)
 	rhoBytes := C.GoBytes(unsafe.Pointer(rho.data), rho.size)
 	if len(rhoBytes) != 32 {
 		return C.int(C.CBMPC_E_BADARG)
@@ -569,18 +572,18 @@ func go_ffi_kem_encap(ek_bytes C.cmem_t, rho C.cmem_t, kem_ct_out *C.cmem_t, kem
 	}
 
 	// Allocate and copy outputs
-	ct_cmem := allocCmem(ct)
-	ss_cmem := allocCmem(ss)
+	ctCmem := allocCmem(ct)
+	ssCmem := allocCmem(ss)
 
-	*kem_ct_out = ct_cmem
-	*kem_ss_out = ss_cmem
+	*kemCTOut = ctCmem
+	*kemSSOut = ssCmem
 
 	return C.int(C.CBMPC_SUCCESS)
 }
 
 //export go_ffi_kem_decap
-func go_ffi_kem_decap(dk_handle unsafe.Pointer, kem_ct C.cmem_t, kem_ss_out *C.cmem_t) C.int {
-	if dk_handle == nil || kem_ss_out == nil {
+func go_ffi_kem_decap(dkHandle unsafe.Pointer, kemCT C.cmem_t, kemSSOut *C.cmem_t) C.int {
+	if dkHandle == nil || kemSSOut == nil {
 		return C.int(C.CBMPC_E_BADARG)
 	}
 
@@ -599,13 +602,13 @@ func go_ffi_kem_decap(dk_handle unsafe.Pointer, kem_ct C.cmem_t, kem_ss_out *C.c
 	}
 
 	// Look up the actual Go object from the handle registry
-	skHandle, exists := lookupHandle(dk_handle)
+	skHandle, exists := lookupHandle(dkHandle)
 	if !exists {
 		return C.int(C.CBMPC_E_NOT_FOUND)
 	}
 
 	// Convert ciphertext to Go
-	ct := C.GoBytes(unsafe.Pointer(kem_ct.data), kem_ct.size)
+	ct := C.GoBytes(unsafe.Pointer(kemCT.data), kemCT.size)
 
 	// Call Go KEM with the actual Go object
 	ss, err := kem.Decapsulate(skHandle, ct)
@@ -614,15 +617,15 @@ func go_ffi_kem_decap(dk_handle unsafe.Pointer, kem_ct C.cmem_t, kem_ss_out *C.c
 	}
 
 	// Allocate and copy output
-	ss_cmem := allocCmem(ss)
-	*kem_ss_out = ss_cmem
+	ssCmem := allocCmem(ss)
+	*kemSSOut = ssCmem
 
 	return C.int(C.CBMPC_SUCCESS)
 }
 
 //export go_ffi_kem_dk_to_ek
-func go_ffi_kem_dk_to_ek(dk_handle unsafe.Pointer, ek_bytes_out *C.cmem_t) C.int {
-	if dk_handle == nil || ek_bytes_out == nil {
+func go_ffi_kem_dk_to_ek(dkHandle unsafe.Pointer, ekBytesOut *C.cmem_t) C.int {
+	if dkHandle == nil || ekBytesOut == nil {
 		return C.int(C.CBMPC_E_BADARG)
 	}
 
@@ -711,7 +714,7 @@ func UCBatchDLProve(qPoints []ECCPoint, wScalarsBytes [][]byte, sessionID []byte
 		return nil, errors.New("empty w scalars")
 	}
 	if len(qPoints) != len(wScalarsBytes) {
-		return nil, errors.New("Q points and w scalars count mismatch")
+		return nil, errors.New("q points and w scalars count mismatch")
 	}
 	if len(sessionID) == 0 {
 		return nil, errors.New("empty session ID")
@@ -1117,7 +1120,9 @@ func UCElGamalComMultPrivateScalarVerify(proof []byte, ePoint ECCPoint, eACommit
 // ECDSA MP Protocols
 // =====================
 
-// ECDSAMP DKG is a C binding wrapper for multi-party ECDSA distributed key generation.
+// ECDSAMP_DKG is a C binding wrapper for multi-party ECDSA distributed key generation.
+//
+//nolint:revive // exported name mirrors native API identifier
 func ECDSAMP_DKG(cj unsafe.Pointer, curveNID int) (ECDSAMPKey, []byte, error) {
 	if cj == nil {
 		return nil, nil, errors.New("nil job")

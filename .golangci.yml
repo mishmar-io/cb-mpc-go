@@ -1,3 +1,4 @@
+version: 2
 run:
   timeout: 5m
   tests: true
@@ -6,25 +7,15 @@ run:
 linters:
   disable-all: true
   enable:
-    - gofumpt
-    - gci
+    - gocritic
     - revive
     - govet
     - staticcheck
     - errcheck
     - ineffassign
     - misspell
-    - gocritic
 
 linters-settings:
-  gofumpt:
-    module-path: github.com/coinbase/cb-mpc-go
-  gci:
-    sections:
-      - Standard
-      - Default
-      - Prefix(github.com/coinbase/cb-mpc-go)
-    skip-generated: true
   revive:
     severity: warning
   misspell:
@@ -35,9 +26,24 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   exclude-rules:
-    # Exclude dupSubExpr warnings for CGO C function calls in backend bindings.
-    # These are false positives - the linter doesn't understand C function signatures.
+    # Exclude the noisy gocritic dupSubExpr in CGO-heavy backend bindings only.
     - linters:
         - gocritic
-      text: "dupSubExpr.*suspicious identical LHS and RHS"
-      path: "pkg/cbmpc/internal/backend/bindings_.*\\.go"
+      text: "suspicious identical LHS and RHS"
+      path: "pkg/cbmpc/internal/backend/.*"
+
+# v2: configure formatters separately
+formatters:
+  enable:
+    - gofumpt
+    - gci
+
+formatters-settings:
+  gofumpt:
+    module-path: github.com/coinbase/cb-mpc-go
+  gci:
+    sections:
+      - Standard
+      - Default
+      - Prefix(github.com/coinbase/cb-mpc-go)
+    skip-generated: true

@@ -43,7 +43,7 @@ type ACEncryptResult struct {
 
 // ACEncrypt performs PVE-AC encryption with access control.
 // See cb-mpc/src/cbmpc/protocol/pve_ac.h for protocol details.
-func (pve *PVE) ACEncrypt(ctx context.Context, p *ACEncryptParams) (*ACEncryptResult, error) {
+func (pve *PVE) ACEncrypt(_ context.Context, p *ACEncryptParams) (*ACEncryptResult, error) {
 	if pve == nil {
 		return nil, errors.New("nil PVE")
 	}
@@ -104,7 +104,7 @@ type ACVerifyParams struct {
 
 // ACVerify verifies a PVE-AC ciphertext.
 // See cb-mpc/src/cbmpc/protocol/pve_ac.h for protocol details.
-func (pve *PVE) ACVerify(ctx context.Context, p *ACVerifyParams) error {
+func (pve *PVE) ACVerify(_ context.Context, p *ACVerifyParams) error {
 	if pve == nil {
 		return errors.New("nil PVE")
 	}
@@ -178,7 +178,7 @@ type ACPartyDecryptRowResult struct {
 // ACPartyDecryptRow performs party decryption for a single row.
 // Each authorized party calls this to produce their share.
 // See cb-mpc/src/cbmpc/protocol/pve_ac.h for protocol details.
-func (pve *PVE) ACPartyDecryptRow(ctx context.Context, p *ACPartyDecryptRowParams) (*ACPartyDecryptRowResult, error) {
+func (pve *PVE) ACPartyDecryptRow(_ context.Context, p *ACPartyDecryptRowParams) (*ACPartyDecryptRowResult, error) {
 	if pve == nil {
 		return nil, errors.New("nil PVE")
 	}
@@ -248,7 +248,7 @@ type ACAggregateToRestoreRowResult struct {
 
 // ACAggregateToRestoreRow aggregates quorum shares to restore the original scalars.
 // See cb-mpc/src/cbmpc/protocol/pve_ac.h for protocol details.
-func (pve *PVE) ACAggregateToRestoreRow(ctx context.Context, p *ACAggregateToRestoreRowParams) (*ACAggregateToRestoreRowResult, error) {
+func (pve *PVE) ACAggregateToRestoreRow(_ context.Context, p *ACAggregateToRestoreRowParams) (*ACAggregateToRestoreRowResult, error) {
 	if pve == nil {
 		return nil, errors.New("nil PVE")
 	}

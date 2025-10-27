@@ -1,5 +1,6 @@
 //go:build cgo && !windows
 
+//nolint:gocritic // CGO call wrappers trigger dupSubExpr false positives
 package backend
 
 /*
@@ -19,7 +20,8 @@ import (
 
 // Error codes from cb-mpc
 const (
-	E_ECDSA_2P_BIT_LEAK = 0xff040002 // Bit leak detected in signature verification
+	// EECDSA2PBitLeak is returned when a bit leak is detected during ECDSA 2P verification.
+	EECDSA2PBitLeak = 0xff040002
 )
 
 // cmemToGoBytes converts a C.cmem_t to a Go []byte slice and takes ownership of the C memory.

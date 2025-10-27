@@ -29,7 +29,8 @@ LDFLAGS_OPENSSL=""
 [[ -d "${OPENSSL_ROOT}/lib64" ]] && LDFLAGS_OPENSSL="${LDFLAGS_OPENSSL} -L${OPENSSL_ROOT}/lib64"
 export CGO_LDFLAGS="${CGO_LDFLAGS:+${CGO_LDFLAGS} }${LDFLAGS_OPENSSL}"
 
-if command -v golangci-lint >/dev/null 2>&1; then
+# Prefer the pinned local golangci-lint; set CBMPC_USE_SYSTEM_GOLANGCI=1 to force system binary
+if [[ "${CBMPC_USE_SYSTEM_GOLANGCI:-0}" == "1" ]] && command -v golangci-lint >/dev/null 2>&1; then
   exec golangci-lint "$@"
 fi
 
@@ -45,7 +46,7 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 TOOLS_BIN="${CBMPC_TOOLS_BIN:-${PWD}/build/bin-${ENV_FLAVOR}}"
-GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v1.64.8}"
+GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.5.0}"
 LOCAL_BIN="${TOOLS_BIN}/golangci-lint"
 
 if [[ ! -x "${LOCAL_BIN}" ]]; then
@@ -53,4 +54,5 @@ if [[ ! -x "${LOCAL_BIN}" ]]; then
   scripts/install_golangci.sh "${LOCAL_BIN}" "${GOLANGCI_LINT_VERSION}"
 fi
 
+# Ensure golangci-lint is built with a Go toolchain >= target Go_VERSION
 PATH="${GO_ROOT}/go/bin:${TOOLS_BIN}:${PATH}" exec "${LOCAL_BIN}" "$@"

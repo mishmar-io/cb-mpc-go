@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEST="${1:-}"
-VERSION="${2:-v1.64.8}"
+VERSION="${2:-v2.5.0}"
 
 if [[ -z "${DEST}" ]]; then
   DEST="${PWD}/build/bin/golangci-lint"
@@ -15,7 +15,7 @@ if [[ -x "${DEST}" ]]; then
   exit 0
 fi
 
-GOBIN="${BIN_DIR}" GOFLAGS=-mod=mod scripts/run_with_go.sh install "github.com/golangci/golangci-lint/cmd/golangci-lint@${VERSION}"
+GOBIN="${BIN_DIR}" GOFLAGS=-mod=mod scripts/run_with_go.sh install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${VERSION}"
 
 if [[ ! -x "${DEST}" ]]; then
   echo "failed to install golangci-lint to ${DEST}" >&2

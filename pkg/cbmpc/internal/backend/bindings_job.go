@@ -1,5 +1,6 @@
 //go:build cgo && !windows
 
+//nolint:gocritic // CGO call wrappers trigger dupSubExpr false positives
 package backend
 
 /*

@@ -94,13 +94,8 @@ func TestHandleValidation(t *testing.T) {
 		// Corrupt the algorithm ID by accessing internal fields
 		// Note: This is a white-box test that accesses unexported fields
 		// In real code, this would be caught by the validation
-		type privateKeyHandle struct {
-			AlgorithmID string
-			KeySize     int
-			PubKeyHash  [32]byte
-			KeyDER      []byte
-			PublicKey   []byte
-		}
+		// NOTE: We intentionally skip this case because internal fields are opaque
+		// and not safely mutable in tests without reflection.
 
 		// We can't directly corrupt since fields are unexported and mutex-protected
 		// Instead, test with a handle from a different algorithm family

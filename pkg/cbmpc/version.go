@@ -3,8 +3,11 @@ package cbmpc
 import "github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
 
 var (
-	Version     = "v0.0.0-in-progress"
+	// Version is the wrapper version populated at build time via -ldflags.
+	Version = "v0.0.0-in-progress"
+	// UpstreamSHA is the pinned upstream cb-mpc commit used for builds.
 	UpstreamSHA = "unknown"
+	// UpstreamDir is the submodule directory name for the upstream tree.
 	UpstreamDir = "cb-mpc"
 )
 

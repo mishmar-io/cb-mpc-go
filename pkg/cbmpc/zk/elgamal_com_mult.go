@@ -65,19 +65,19 @@ func ProveElGamalComMult(params *ElGamalComMultProveParams) (ElGamalComMultProof
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return nil, errors.New("Q point has been freed")
+		return nil, errors.New("q point has been freed")
 	}
 	aCommitment := params.A.CPtr()
 	if aCommitment == nil {
-		return nil, errors.New("A commitment has been freed")
+		return nil, errors.New("a commitment has been freed")
 	}
 	bCommitment := params.B.CPtr()
 	if bCommitment == nil {
-		return nil, errors.New("B commitment has been freed")
+		return nil, errors.New("b commitment has been freed")
 	}
 	cCommitment := params.C.CPtr()
 	if cCommitment == nil {
-		return nil, errors.New("C commitment has been freed")
+		return nil, errors.New("c commitment has been freed")
 	}
 
 	proofBytes, err := backend.ElGamalComMultProve(
@@ -144,19 +144,19 @@ func VerifyElGamalComMult(params *ElGamalComMultVerifyParams) error {
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return errors.New("Q point has been freed")
+		return errors.New("q point has been freed")
 	}
 	aCommitment := params.A.CPtr()
 	if aCommitment == nil {
-		return errors.New("A commitment has been freed")
+		return errors.New("a commitment has been freed")
 	}
 	bCommitment := params.B.CPtr()
 	if bCommitment == nil {
-		return errors.New("B commitment has been freed")
+		return errors.New("b commitment has been freed")
 	}
 	cCommitment := params.C.CPtr()
 	if cCommitment == nil {
-		return errors.New("C commitment has been freed")
+		return errors.New("c commitment has been freed")
 	}
 
 	err := backend.ElGamalComMultVerify(

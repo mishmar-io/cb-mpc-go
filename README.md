@@ -60,7 +60,7 @@ A production-focused Go wrapper around [Coinbase's cb-mpc](https://github.com/co
    make lint
    ```
 
-   A matching `golangci-lint` v1.64.8 binary is installed into `build/bin-host` (or `build/bin-docker` in container mode) on demand.
+   A matching `golangci-lint` v2.5.0 binary is installed into `build/bin-host` (or `build/bin-docker` in container mode) on demand.
 
 ## Development workflow
 

@@ -36,11 +36,25 @@ if [[ "${CBMPC_USE_DOCKER:-0}" == "1" ]]; then
   exit 0
 fi
 
+# Establish required Go version early for subsequent comparisons
+GO_VERSION="${GO_VERSION:-1.25.2}"
+
 if command -v go >/dev/null 2>&1; then
-  exec go "$@"
+  # Prefer system Go only if it is recent enough; otherwise fall back to the pinned toolchain.
+  SYS_GO_VER_RAW="$(go version | awk '{print $3}')"  # e.g. go1.24.2
+  REQ_GO_VER_RAW="go${GO_VERSION}"                  # e.g. go1.25.2
+  SYS_GO_VER_NUM="${SYS_GO_VER_RAW#go}"
+  REQ_GO_VER_NUM="${REQ_GO_VER_RAW#go}"
+  # Compare using sort -V: the lesser version will be first; if it's the system version, it's older.
+  SMALLEST_VER="$(printf "%s\n%s\n" "${SYS_GO_VER_NUM}" "${REQ_GO_VER_NUM}" | sort -V | head -n1)"
+  if [[ "${SMALLEST_VER}" == "${REQ_GO_VER_NUM}" ]]; then
+    # System Go is older than required; use pinned toolchain below.
+    :
+  else
+    exec go "$@"
+  fi
 fi
 
-GO_VERSION="${GO_VERSION:-1.25.2}"
 GO_ROOT="${CBMPC_GO_ROOT:-${PWD}/build/go-${ENV_FLAVOR}}"
 LOCAL_GO="${GO_ROOT}/go/bin/go"
 

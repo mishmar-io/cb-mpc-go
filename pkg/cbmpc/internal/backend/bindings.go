@@ -1,6 +1,6 @@
 //go:build cgo && !windows
 
-// Package bindings provides the CGO bridge between Go and the C++ cb-mpc library.
+// Package backend provides the CGO bridge between Go and the C++ cb-mpc library.
 //
 // The package is organized as follows:
 //   - bindings.go: CGO build configuration (this file)

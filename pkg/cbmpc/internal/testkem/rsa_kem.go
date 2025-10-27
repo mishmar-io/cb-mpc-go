@@ -164,7 +164,7 @@ func (k *ToyRSAKEM) NewPrivateKeyHandle(skRef []byte) (any, error) {
 // This should be called when the handle is no longer needed.
 // With the transparent handle registry, this is now a no-op as the bindings
 // layer manages the lifecycle.
-func (k *ToyRSAKEM) FreePrivateKeyHandle(handle any) {
+func (k *ToyRSAKEM) FreePrivateKeyHandle(_ any) {
 	// No-op: The bindings layer's handle registry manages the lifecycle
 	// This method is kept for API compatibility with existing tests
 }

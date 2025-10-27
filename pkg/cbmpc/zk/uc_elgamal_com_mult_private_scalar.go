@@ -60,15 +60,15 @@ func ProveUCElGamalComMultPrivateScalar(params *UCElGamalComMultPrivateScalarPro
 
 	ePoint := params.E.CPtr()
 	if ePoint == nil {
-		return nil, errors.New("E point has been freed")
+		return nil, errors.New("e point has been freed")
 	}
 	eaCommitment := params.EA.CPtr()
 	if eaCommitment == nil {
-		return nil, errors.New("EA commitment has been freed")
+		return nil, errors.New("ea commitment has been freed")
 	}
 	ebCommitment := params.EB.CPtr()
 	if ebCommitment == nil {
-		return nil, errors.New("EB commitment has been freed")
+		return nil, errors.New("eb commitment has been freed")
 	}
 
 	proofBytes, err := backend.UCElGamalComMultPrivateScalarProve(
@@ -128,15 +128,15 @@ func VerifyUCElGamalComMultPrivateScalar(params *UCElGamalComMultPrivateScalarVe
 
 	ePoint := params.E.CPtr()
 	if ePoint == nil {
-		return errors.New("E point has been freed")
+		return errors.New("e point has been freed")
 	}
 	eaCommitment := params.EA.CPtr()
 	if eaCommitment == nil {
-		return errors.New("EA commitment has been freed")
+		return errors.New("ea commitment has been freed")
 	}
 	ebCommitment := params.EB.CPtr()
 	if ebCommitment == nil {
-		return errors.New("EB commitment has been freed")
+		return errors.New("eb commitment has been freed")
 	}
 
 	err := backend.UCElGamalComMultPrivateScalarVerify(

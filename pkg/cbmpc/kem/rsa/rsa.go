@@ -1,5 +1,6 @@
 //go:build cgo && !windows
 
+// Package rsa provides a deterministic RSA-OAEP KEM used by PVE.
 package rsa
 
 import (
@@ -17,7 +18,7 @@ import (
 // Typed errors for handle validation.
 var (
 	// ErrInvalidHandleType indicates the handle is not a *privateKeyHandle.
-	ErrInvalidHandleType = errors.New("invalid handle type: expected RSA private key handle")
+	ErrInvalidHandleType = errors.New("invalid handle type: expected rsa private key handle")
 
 	// ErrAlgorithmMismatch indicates the handle's algorithm family doesn't match this KEM.
 	ErrAlgorithmMismatch = errors.New("algorithm family mismatch: handle is not for RSA-OAEP")

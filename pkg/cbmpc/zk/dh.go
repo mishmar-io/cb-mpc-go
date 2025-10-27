@@ -55,15 +55,15 @@ func ProveDH(params *DHProveParams) (DHProof, error) {
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return nil, errors.New("Q point has been freed")
+		return nil, errors.New("q point has been freed")
 	}
 	aPoint := params.A.CPtr()
 	if aPoint == nil {
-		return nil, errors.New("A point has been freed")
+		return nil, errors.New("a point has been freed")
 	}
 	bPoint := params.B.CPtr()
 	if bPoint == nil {
-		return nil, errors.New("B point has been freed")
+		return nil, errors.New("b point has been freed")
 	}
 
 	proofBytes, err := backend.DHProve(qPoint, aPoint, bPoint, params.Exponent.Bytes, params.SessionID.Bytes(), params.Aux)
@@ -113,15 +113,15 @@ func VerifyDH(params *DHVerifyParams) error {
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return errors.New("Q point has been freed")
+		return errors.New("q point has been freed")
 	}
 	aPoint := params.A.CPtr()
 	if aPoint == nil {
-		return errors.New("A point has been freed")
+		return errors.New("a point has been freed")
 	}
 	bPoint := params.B.CPtr()
 	if bPoint == nil {
-		return errors.New("B point has been freed")
+		return errors.New("b point has been freed")
 	}
 
 	err := backend.DHVerify([]byte(params.Proof), qPoint, aPoint, bPoint, params.SessionID.Bytes(), params.Aux)

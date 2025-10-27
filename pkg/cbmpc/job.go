@@ -12,12 +12,17 @@ import (
 )
 
 var (
-	ErrInvalidBits  = errors.New("bitlen must be >= 8 and a multiple of 8")
-	ErrBadPeers     = errors.New("invalid peers/self configuration")
+	// ErrInvalidBits is returned when a requested bit length is invalid.
+	ErrInvalidBits = errors.New("bitlen must be >= 8 and a multiple of 8")
+	// ErrBadPeers indicates a malformed topology or self role for a job.
+	ErrBadPeers = errors.New("invalid peers/self configuration")
+	// ErrNilTransport signals that a required Transport was nil.
 	ErrNilTransport = errors.New("transport must not be nil")
-	ErrJobClosed    = errors.New("job has been closed")
+	// ErrJobClosed indicates that the job has already been closed.
+	ErrJobClosed = errors.New("job has been closed")
 )
 
+// Job2P is a two-party MPC job handle tied to a native session.
 type Job2P struct {
 	cptr      unsafe.Pointer
 	hptr      uintptr
@@ -25,6 +30,7 @@ type Job2P struct {
 	closeOnce sync.Once
 }
 
+// JobMP is an n-party MPC job handle tied to a native session.
 type JobMP struct {
 	cptr      unsafe.Pointer
 	hptr      uintptr
@@ -103,6 +109,7 @@ func NewJob2PWithContext(ctx context.Context, t Transport, self Role, names [2]s
 	return j, nil
 }
 
+// Close releases native resources associated with the 2-party job.
 func (j *Job2P) Close() error {
 	if j == nil {
 		return nil
@@ -167,6 +174,7 @@ func NewJobMPWithContext(ctx context.Context, t Transport, self RoleID, names []
 	return j, nil
 }
 
+// Close releases native resources associated with the n-party job.
 func (j *JobMP) Close() error {
 	if j == nil {
 		return nil
@@ -238,11 +246,4 @@ func (s SessionID) Bytes() []byte {
 // An empty SessionID indicates a fresh session should be created.
 func (s SessionID) IsEmpty() bool {
 	return len(s.data) == 0
-}
-
-// internal returns the internal data for use within the cbmpc package.
-// This avoids unnecessary copying when passing to backend functions.
-// IMPORTANT: Callers must not mutate the returned slice.
-func (s SessionID) internal() []byte {
-	return s.data
 }

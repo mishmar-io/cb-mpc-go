@@ -10,20 +10,15 @@ type RoleID uint32
 type Role uint8
 
 const (
+	// RoleP1 is the first party in 2-party protocols.
 	RoleP1 Role = iota
+	// RoleP2 is the second party in 2-party protocols.
 	RoleP2
 )
 
 func (r Role) roleID() RoleID { return RoleID(r) }
 
 func (r Role) valid() bool { return r == RoleP1 || r == RoleP2 }
-
-func (r Role) peer() RoleID {
-	if r == RoleP1 {
-		return RoleID(RoleP2)
-	}
-	return RoleID(RoleP1)
-}
 
 // Transport captures the messaging contract required by the native library.
 //

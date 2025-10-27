@@ -182,7 +182,7 @@ func (k *HSMKEM) NewPrivateKeyHandle(skRef []byte) (any, error) {
 }
 
 // FreePrivateKeyHandle is a no-op for HSM handles.
-func (k *HSMKEM) FreePrivateKeyHandle(handle any) error {
+func (k *HSMKEM) FreePrivateKeyHandle(_ any) error {
 	// HSM manages its own keys
 	return nil
 }

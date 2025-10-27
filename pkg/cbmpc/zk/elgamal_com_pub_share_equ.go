@@ -53,15 +53,15 @@ func ProveElGamalComPubShareEqu(params *ElGamalComPubShareEquProveParams) (ElGam
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return nil, errors.New("Q point has been freed")
+		return nil, errors.New("q point has been freed")
 	}
 	aPoint := params.A.CPtr()
 	if aPoint == nil {
-		return nil, errors.New("A point has been freed")
+		return nil, errors.New("a point has been freed")
 	}
 	bCommitment := params.B.CPtr()
 	if bCommitment == nil {
-		return nil, errors.New("B commitment has been freed")
+		return nil, errors.New("b commitment has been freed")
 	}
 
 	proofBytes, err := backend.ElGamalComPubShareEquProve(qPoint, aPoint, bCommitment, params.R.Bytes, params.SessionID.Bytes(), params.Aux)
@@ -111,15 +111,15 @@ func VerifyElGamalComPubShareEqu(params *ElGamalComPubShareEquVerifyParams) erro
 
 	qPoint := params.Q.CPtr()
 	if qPoint == nil {
-		return errors.New("Q point has been freed")
+		return errors.New("q point has been freed")
 	}
 	aPoint := params.A.CPtr()
 	if aPoint == nil {
-		return errors.New("A point has been freed")
+		return errors.New("a point has been freed")
 	}
 	bCommitment := params.B.CPtr()
 	if bCommitment == nil {
-		return errors.New("B commitment has been freed")
+		return errors.New("b commitment has been freed")
 	}
 
 	err := backend.ElGamalComPubShareEquVerify([]byte(params.Proof), qPoint, aPoint, bCommitment, params.SessionID.Bytes(), params.Aux)

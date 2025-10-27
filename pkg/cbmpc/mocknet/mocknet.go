@@ -10,11 +10,14 @@ import (
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 )
 
+// Net is an in-memory transport for tests that simulates a network with
+// per-peer sequencing and per-direction buffering.
 type Net struct {
 	mu sync.Mutex
 	q  map[queueKey]chan []byte
 }
 
+// New constructs a new in-memory mock network.
 func New() *Net { return &Net{q: make(map[queueKey]chan []byte)} }
 
 type queueKey struct {
@@ -242,14 +245,18 @@ func (e *endpoint) normalizeRoles(from []cbmpc.RoleID) ([]cbmpc.RoleID, error) {
 }
 
 type (
+	// Endpoint2P is a 2-party transport endpoint backed by Net.
 	Endpoint2P struct{ *endpoint }
+	// EndpointMP is an n-party transport endpoint backed by Net.
 	EndpointMP struct{ *endpoint }
 )
 
+// Ep2P constructs a 2-party transport endpoint for self and peer.
 func (n *Net) Ep2P(self, peer cbmpc.RoleID) *Endpoint2P {
 	return &Endpoint2P{endpoint: newEndpoint(n, self, []cbmpc.RoleID{peer})}
 }
 
+// EpMP constructs an n-party transport endpoint for self and peers.
 func (n *Net) EpMP(self cbmpc.RoleID, peers []cbmpc.RoleID) *EndpointMP {
 	return &EndpointMP{endpoint: newEndpoint(n, self, peers)}
 }
