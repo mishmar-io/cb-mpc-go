@@ -19,13 +19,19 @@ fi
 DOCKER_IMAGE="${CBMPC_DOCKER_IMAGE:-cb-mpc-go/dev}"
 DOCKERFILE="${CBMPC_DOCKERFILE:-Dockerfile}"
 ENV_FLAVOR="${CBMPC_ENV_FLAVOR:-docker}"
+DOCKER_PLATFORM="${CBMPC_DOCKER_PLATFORM:-}"
 
 mkdir -p build/.cache/go-build-${ENV_FLAVOR} build/.cache/go-mod-${ENV_FLAVOR} \
   build/.cache/golangci-${ENV_FLAVOR} build/openssl-${ENV_FLAVOR} build/cb-mpc-${ENV_FLAVOR} \
   build/gopath-${ENV_FLAVOR}
 
+PLATFORM_ARG=()
+if [[ -n "${DOCKER_PLATFORM}" ]]; then
+  PLATFORM_ARG=(--platform "${DOCKER_PLATFORM}")
+fi
+
 if ! "${DOCKER_BIN}" image inspect "${DOCKER_IMAGE}" >/dev/null 2>&1; then
-  "${DOCKER_BIN}" build -t "${DOCKER_IMAGE}" -f "${DOCKERFILE}" .
+  "${DOCKER_BIN}" build "${PLATFORM_ARG[@]}" -t "${DOCKER_IMAGE}" -f "${DOCKERFILE}" .
 fi
 
 UID_VALUE="$(id -u)"
@@ -35,6 +41,7 @@ GID_VALUE="$(id -g)"
 OPENSSL_ROOT="/workspace/build/openssl-${ENV_FLAVOR}"
 
 "${DOCKER_BIN}" run --rm \
+  "${PLATFORM_ARG[@]}" \
   -v "${PWD}":/workspace \
   -w /workspace \
   -e CBMPC_USE_DOCKER=0 \

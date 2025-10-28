@@ -101,18 +101,28 @@ jobs:
 
       - name: Bootstrap dependencies
         run: make bootstrap
+        env:
+          CBMPC_DOCKER_PLATFORM: linux/${{ matrix.arch }}
 
       - name: Run static checks
         run: make check
+        env:
+          CBMPC_DOCKER_PLATFORM: linux/${{ matrix.arch }}
 
       - name: Enforce cgo boundary
         run: make check-boundary
+        env:
+          CBMPC_DOCKER_PLATFORM: linux/${{ matrix.arch }}
 
       - name: Run tidy check
         run: make tidy-check
+        env:
+          CBMPC_DOCKER_PLATFORM: linux/${{ matrix.arch }}
 
       - name: Run tests
         run: make test
+        env:
+          CBMPC_DOCKER_PLATFORM: linux/${{ matrix.arch }}
 
   native-macos:
     name: Native macOS
