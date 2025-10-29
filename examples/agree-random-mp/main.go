@@ -8,7 +8,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/coinbase/cb-mpc-go/examples/common"
+	"github.com/coinbase/cb-mpc-go/examples/internal/config"
 	"github.com/coinbase/cb-mpc-go/examples/tlsnet"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/agreerandom"
@@ -27,11 +27,11 @@ func main() {
 		log.Fatal("--self flag is required")
 	}
 
-	cfg, err := common.LoadConfig(*configPath)
+	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	if err := common.ValidateConfig(cfg); err != nil {
+	if err := config.ValidateConfig(cfg); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
 
@@ -49,12 +49,12 @@ func main() {
 		log.Fatalf("self name %q not present in config", *selfName)
 	}
 
-	cert, err := common.LoadKeyPair(cfg.Parties[selfIndex].Cert, cfg.Parties[selfIndex].Key)
+	cert, err := config.LoadKeyPair(cfg.Parties[selfIndex].Cert, cfg.Parties[selfIndex].Key)
 	if err != nil {
 		log.Fatalf("load certificate: %v", err)
 	}
 
-	caPool, err := common.LoadCertPool(cfg.CACert)
+	caPool, err := config.LoadCertPool(cfg.CACert)
 	if err != nil {
 		log.Fatalf("load CA: %v", err)
 	}

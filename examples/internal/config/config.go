@@ -1,4 +1,4 @@
-package common
+package config
 
 import (
 	"crypto/tls"
@@ -153,3 +153,5 @@ func ValidateConfig(cfg *ClusterConfig) error {
 	}
 	return nil
 }
+
+

@@ -31,7 +31,7 @@ cd "${WORK_DIR}"
 TARBALL="openssl-${VERSION}.tar.gz"
 URL="https://github.com/openssl/openssl/releases/download/openssl-${VERSION}/${TARBALL}"
 
-curl -L "${URL}" -o "${TARBALL}"
+curl -fsSL "${URL}" -o "${TARBALL}"
 if command -v shasum >/dev/null 2>&1; then
   DOWNLOAD_HASH=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
 elif command -v sha256sum >/dev/null 2>&1; then

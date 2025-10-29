@@ -12,18 +12,11 @@ import "C"
 
 import (
 	"errors"
-	"fmt"
 	"runtime"
 	"unsafe"
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/kem"
 )
-
-// formatNativeErr formats a native error code with category and code fields.
-func formatNativeErr(op string, rc C.int) error {
-	u := uint32(rc)
-	return fmt.Errorf("%s failed with code %d (0x%x, cat=0x%x, code=0x%x)", op, int(rc), u, (u>>16)&0xff, u&0xffff)
-}
 
 // AgreeRandom2P is a C binding wrapper for the two-party agree random protocol.
 func AgreeRandom2P(cj unsafe.Pointer, bitlen int) ([]byte, error) {
@@ -31,7 +24,7 @@ func AgreeRandom2P(cj unsafe.Pointer, bitlen int) ([]byte, error) {
 		return nil, errors.New("nil job")
 	}
 	var out C.cmem_t
-	rc := C.cbmpc_agree_random_2p((*C.cbmpc_job2p)(cj), C.int(bitlen), &out)
+	rc := C.cbmpc_agree_random_2p((*C.cbmpc_job2p)(cj), cIntFromLen(bitlen), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("agree_random", rc)
 	}
@@ -44,7 +37,7 @@ func AgreeRandomMP(cj unsafe.Pointer, bitlen int) ([]byte, error) {
 		return nil, errors.New("nil job")
 	}
 	var out C.cmem_t
-	rc := C.cbmpc_multi_agree_random((*C.cbmpc_jobmp)(cj), C.int(bitlen), &out)
+	rc := C.cbmpc_multi_agree_random((*C.cbmpc_jobmp)(cj), cIntFromLen(bitlen), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("multi_agree_random", rc)
 	}
@@ -57,7 +50,7 @@ func WeakMultiAgreeRandom(cj unsafe.Pointer, bitlen int) ([]byte, error) {
 		return nil, errors.New("nil job")
 	}
 	var out C.cmem_t
-	rc := C.cbmpc_weak_multi_agree_random((*C.cbmpc_jobmp)(cj), C.int(bitlen), &out)
+	rc := C.cbmpc_weak_multi_agree_random((*C.cbmpc_jobmp)(cj), cIntFromLen(bitlen), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("weak_multi_agree_random", rc)
 	}
@@ -70,7 +63,7 @@ func MultiPairwiseAgreeRandom(cj unsafe.Pointer, bitlen int) ([][]byte, error) {
 		return nil, errors.New("nil job")
 	}
 	var out C.cmems_t
-	rc := C.cbmpc_multi_pairwise_agree_random((*C.cbmpc_jobmp)(cj), C.int(bitlen), &out)
+	rc := C.cbmpc_multi_pairwise_agree_random((*C.cbmpc_jobmp)(cj), cIntFromLen(bitlen), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("multi_pairwise_agree_random", rc)
 	}
@@ -84,7 +77,7 @@ func ECDSA2PDKG(cj unsafe.Pointer, curveNID int) (ECDSA2PKey, error) {
 	}
 
 	var key ECDSA2PKey
-	rc := C.cbmpc_ecdsa2p_dkg((*C.cbmpc_job2p)(cj), C.int(curveNID), &key)
+	rc := C.cbmpc_ecdsa2p_dkg((*C.cbmpc_job2p)(cj), cIntFromLen(curveNID), &key)
 	if rc != 0 {
 		return nil, formatNativeErr("ecdsa2p_dkg", rc)
 	}
@@ -164,7 +157,9 @@ func ECDSA2PSignBatch(cj unsafe.Pointer, key ECDSA2PKey, sidIn []byte, msgs [][]
 }
 
 // ECDSA2PSignWithGlobalAbort signs a message with an ECDSA 2P key using global abort mode.
-// Returns ErrBitLeak if signature verification fails (indicates potential key leak).
+// Returns ErrMustLock indicates potential leakage of a single bit of the key.
+// The caller must halt all other parallel signing operations and should not
+// initiate another signing operation until the error is investigated.
 func ECDSA2PSignWithGlobalAbort(cj unsafe.Pointer, key ECDSA2PKey, sidIn, msg []byte) ([]byte, []byte, error) {
 	if cj == nil {
 		return nil, nil, errors.New("nil job")
@@ -185,8 +180,8 @@ func ECDSA2PSignWithGlobalAbort(cj unsafe.Pointer, key ECDSA2PKey, sidIn, msg []
 	var sidOut, sigOut C.cmem_t
 	rc := C.cbmpc_ecdsa2p_sign_with_global_abort((*C.cbmpc_job2p)(cj), sidMem, key, msgMem, &sidOut, &sigOut)
 	if rc != 0 {
-		if C.uint(rc) == C.uint(EECDSA2PBitLeak) {
-			return nil, nil, ErrBitLeak
+		if isEECDSA2PBitLeakRC(rc) {
+			return nil, nil, ErrMustLock
 		}
 		return nil, nil, formatNativeErr("ecdsa2p_sign_with_global_abort", rc)
 	}
@@ -195,7 +190,9 @@ func ECDSA2PSignWithGlobalAbort(cj unsafe.Pointer, key ECDSA2PKey, sidIn, msg []
 }
 
 // ECDSA2PSignWithGlobalAbortBatch signs multiple messages with an ECDSA 2P key using global abort mode (batch mode).
-// Returns ErrBitLeak if signature verification fails (indicates potential key leak).
+// Returns ErrMustLock indicates potential leakage of a single bit of the key.
+// The caller must halt all other parallel signing operations and should not
+// initiate another signing operation until the error is investigated.
 func ECDSA2PSignWithGlobalAbortBatch(cj unsafe.Pointer, key ECDSA2PKey, sidIn []byte, msgs [][]byte) ([]byte, [][]byte, error) {
 	if cj == nil {
 		return nil, nil, errors.New("nil job")
@@ -217,8 +214,8 @@ func ECDSA2PSignWithGlobalAbortBatch(cj unsafe.Pointer, key ECDSA2PKey, sidIn []
 	var sigsOut C.cmems_t
 	rc := C.cbmpc_ecdsa2p_sign_with_global_abort_batch((*C.cbmpc_job2p)(cj), sidMem, key, msgsMem, &sidOut, &sigsOut)
 	if rc != 0 {
-		if C.uint(rc) == C.uint(EECDSA2PBitLeak) {
-			return nil, nil, ErrBitLeak
+		if isEECDSA2PBitLeakRC(rc) {
+			return nil, nil, ErrMustLock
 		}
 		return nil, nil, formatNativeErr("ecdsa2p_sign_with_global_abort_batch", rc)
 	}
@@ -261,7 +258,7 @@ func PVEEncrypt(k KEM, ekBytes, label []byte, curveNID int, xBytes []byte) ([]by
 	xMem := goBytesToCmem(xBytes)
 
 	var out C.cmem_t
-	rc := C.cbmpc_pve_encrypt(ekMem, labelMem, C.int(curveNID), xMem, &out)
+	rc := C.cbmpc_pve_encrypt(ekMem, labelMem, cIntFromLen(curveNID), xMem, &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_encrypt", rc)
 	}
@@ -306,7 +303,7 @@ func PVEDecrypt(k KEM, dkHandle unsafe.Pointer, ekBytes, pveCT, label []byte, cu
 	// The dkHandle is an opaque identifier (not a Go pointer) that will be passed through
 	// C++ back to Go callbacks. C++ only stores and passes it, never dereferences it.
 	// The actual handle lookup happens in the Go KEM implementation.
-	rc := C.cbmpc_pve_decrypt(dkHandle, ekMem, pveCTMem, labelMem, C.int(curveNID), &out)
+	rc := C.cbmpc_pve_decrypt(dkHandle, ekMem, pveCTMem, labelMem, cIntFromLen(curveNID), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_decrypt", rc)
 	}
@@ -425,7 +422,7 @@ func PVEBatchEncrypt(k KEM, ekBytes, label []byte, curveNID int, xScalarsBytes [
 	defer freeCmems(xScalarsMem)
 
 	var out C.cmem_t
-	rc := C.cbmpc_pve_batch_encrypt(ekMem, labelMem, C.int(curveNID), xScalarsMem, &out)
+	rc := C.cbmpc_pve_batch_encrypt(ekMem, labelMem, cIntFromLen(curveNID), xScalarsMem, &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_batch_encrypt", rc)
 	}
@@ -475,7 +472,7 @@ func PVEBatchVerify(k KEM, ekBytes, pveCT []byte, qPoints []ECCPoint, label []by
 	pveCTMem := goBytesToCmem(pveCT)
 	labelMem := goBytesToCmem(label)
 
-	rc := C.cbmpc_pve_batch_verify(ekMem, pveCTMem, &cPoints[0], C.int(len(cPoints)), labelMem)
+	rc := C.cbmpc_pve_batch_verify(ekMem, pveCTMem, &cPoints[0], cIntFromLen(len(cPoints)), labelMem)
 	if rc != 0 {
 		return formatNativeErr("pve_batch_verify", rc)
 	}
@@ -517,7 +514,7 @@ func PVEBatchDecrypt(k KEM, dkHandle unsafe.Pointer, ekBytes, pveCT, label []byt
 	labelMem := goBytesToCmem(label)
 
 	var out C.cmems_t
-	rc := C.cbmpc_pve_batch_decrypt(dkHandle, ekMem, pveCTMem, labelMem, C.int(curveNID), &out)
+	rc := C.cbmpc_pve_batch_decrypt(dkHandle, ekMem, pveCTMem, labelMem, cIntFromLen(curveNID), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_batch_decrypt", rc)
 	}
@@ -538,28 +535,28 @@ type KEM = kem.KEM
 //export go_ffi_kem_encap
 func go_ffi_kem_encap(ekBytes C.cmem_t, rho C.cmem_t, kemCTOut *C.cmem_t, kemSSOut *C.cmem_t) C.int {
 	if kemCTOut == nil || kemSSOut == nil {
-		return C.int(C.CBMPC_E_BADARG)
+		return C.CBMPC_E_BADARG
 	}
 
 	// Retrieve KEM from thread-local handle set by the caller
 	tlsHandle := C.cbmpc_get_kem_tls()
 	if tlsHandle == nil {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	v, ok := lookupHandle(tlsHandle)
 	if !ok {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	kem, ok := v.(KEM)
 	if !ok || kem == nil {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 
 	// Convert inputs to Go
 	ek := C.GoBytes(unsafe.Pointer(ekBytes.data), ekBytes.size)
 	rhoBytes := C.GoBytes(unsafe.Pointer(rho.data), rho.size)
 	if len(rhoBytes) != 32 {
-		return C.int(C.CBMPC_E_BADARG)
+		return C.CBMPC_E_BADARG
 	}
 
 	var rho32 [32]byte
@@ -568,7 +565,7 @@ func go_ffi_kem_encap(ekBytes C.cmem_t, rho C.cmem_t, kemCTOut *C.cmem_t, kemSSO
 	// Call Go KEM
 	ct, ss, err := kem.Encapsulate(ek, rho32)
 	if err != nil {
-		return C.int(C.CBMPC_E_CRYPTO)
+		return C.CBMPC_E_CRYPTO
 	}
 
 	// Allocate and copy outputs
@@ -578,33 +575,33 @@ func go_ffi_kem_encap(ekBytes C.cmem_t, rho C.cmem_t, kemCTOut *C.cmem_t, kemSSO
 	*kemCTOut = ctCmem
 	*kemSSOut = ssCmem
 
-	return C.int(C.CBMPC_SUCCESS)
+	return C.CBMPC_SUCCESS
 }
 
 //export go_ffi_kem_decap
 func go_ffi_kem_decap(dkHandle unsafe.Pointer, kemCT C.cmem_t, kemSSOut *C.cmem_t) C.int {
 	if dkHandle == nil || kemSSOut == nil {
-		return C.int(C.CBMPC_E_BADARG)
+		return C.CBMPC_E_BADARG
 	}
 
 	// Retrieve KEM from thread-local handle set by the caller
 	tlsHandle := C.cbmpc_get_kem_tls()
 	if tlsHandle == nil {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	v, ok := lookupHandle(tlsHandle)
 	if !ok {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	kem, ok := v.(KEM)
 	if !ok || kem == nil {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 
 	// Look up the actual Go object from the handle registry
 	skHandle, exists := lookupHandle(dkHandle)
 	if !exists {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 
 	// Convert ciphertext to Go
@@ -613,38 +610,38 @@ func go_ffi_kem_decap(dkHandle unsafe.Pointer, kemCT C.cmem_t, kemSSOut *C.cmem_
 	// Call Go KEM with the actual Go object
 	ss, err := kem.Decapsulate(skHandle, ct)
 	if err != nil {
-		return C.int(C.CBMPC_E_CRYPTO)
+		return C.CBMPC_E_CRYPTO
 	}
 
 	// Allocate and copy output
 	ssCmem := allocCmem(ss)
 	*kemSSOut = ssCmem
 
-	return C.int(C.CBMPC_SUCCESS)
+	return C.CBMPC_SUCCESS
 }
 
 //export go_ffi_kem_dk_to_ek
 func go_ffi_kem_dk_to_ek(dkHandle unsafe.Pointer, ekBytesOut *C.cmem_t) C.int {
 	if dkHandle == nil || ekBytesOut == nil {
-		return C.int(C.CBMPC_E_BADARG)
+		return C.CBMPC_E_BADARG
 	}
 
 	// Retrieve KEM from thread-local handle set by the caller
 	tlsHandle := C.cbmpc_get_kem_tls()
 	if tlsHandle == nil {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	v, ok := lookupHandle(tlsHandle)
 	if !ok {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 	_, ok = v.(KEM)
 	if !ok {
-		return C.int(C.CBMPC_E_NOT_FOUND)
+		return C.CBMPC_E_NOT_FOUND
 	}
 
 	// Not implemented by design: callers must provide EK explicitly.
-	return C.int(C.CBMPC_E_NOT_SUPPORTED)
+	return C.CBMPC_E_NOT_SUPPORTED
 }
 
 // =====================
@@ -734,7 +731,7 @@ func UCBatchDLProve(qPoints []ECCPoint, wScalarsBytes [][]byte, sessionID []byte
 	sessionIDMem := goBytesToCmem(sessionID)
 
 	var out C.cmem_t
-	rc := C.cbmpc_uc_batch_dl_prove(&cPoints[0], C.int(len(cPoints)), wScalarsMem, sessionIDMem, C.uint64_t(aux), &out)
+	rc := C.cbmpc_uc_batch_dl_prove(&cPoints[0], cIntFromLen(len(cPoints)), wScalarsMem, sessionIDMem, C.uint64_t(aux), &out)
 	if rc != 0 {
 		return nil, formatNativeErr("uc_batch_dl_prove", rc)
 	}
@@ -767,7 +764,7 @@ func UCBatchDLVerify(proof []byte, qPoints []ECCPoint, sessionID []byte, aux uin
 	proofMem := goBytesToCmem(proof)
 	sessionIDMem := goBytesToCmem(sessionID)
 
-	rc := C.cbmpc_uc_batch_dl_verify(proofMem, &cPoints[0], C.int(len(cPoints)), sessionIDMem, C.uint64_t(aux))
+	rc := C.cbmpc_uc_batch_dl_verify(proofMem, &cPoints[0], cIntFromLen(len(cPoints)), sessionIDMem, C.uint64_t(aux))
 	if rc != 0 {
 		return formatNativeErr("uc_batch_dl_verify", rc)
 	}
@@ -1130,7 +1127,7 @@ func ECDSAMP_DKG(cj unsafe.Pointer, curveNID int) (ECDSAMPKey, []byte, error) {
 
 	var key ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_ecdsamp_dkg((*C.cbmpc_jobmp)(cj), C.int(curveNID), &key, &sidOut)
+	rc := C.cbmpc_ecdsamp_dkg((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), &key, &sidOut)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("ecdsamp_dkg", rc)
 	}
@@ -1178,7 +1175,7 @@ func ECDSAMPSign(cj unsafe.Pointer, key ECDSAMPKey, msg []byte, sigReceiver int)
 	defer freeCmem(msgMem)
 
 	var sigOut C.cmem_t
-	rc := C.cbmpc_ecdsamp_sign((*C.cbmpc_jobmp)(cj), key, msgMem, C.int(sigReceiver), &sigOut)
+	rc := C.cbmpc_ecdsamp_sign((*C.cbmpc_jobmp)(cj), key, msgMem, cIntFromLen(sigReceiver), &sigOut)
 	if rc != 0 {
 		return nil, formatNativeErr("ecdsamp_sign", rc)
 	}
@@ -1201,14 +1198,14 @@ func ECDSAMPThresholdDKG(cj unsafe.Pointer, curveNID int, acBytes []byte, quorum
 	// Convert Go slice to C array
 	cIndices := make([]C.int, len(quorumPartyIndices))
 	for i, idx := range quorumPartyIndices {
-		cIndices[i] = C.int(idx)
+		cIndices[i] = cIntFromLen(idx)
 	}
 
 	acMem := goBytesToCmem(acBytes)
 
 	var key ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_ecdsamp_threshold_dkg((*C.cbmpc_jobmp)(cj), C.int(curveNID), acMem, &cIndices[0], C.int(len(cIndices)), &key, &sidOut)
+	rc := C.cbmpc_ecdsamp_threshold_dkg((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), acMem, &cIndices[0], cIntFromLen(len(cIndices)), &key, &sidOut)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("ecdsamp_threshold_dkg", rc)
 	}
@@ -1235,7 +1232,7 @@ func ECDSAMPThresholdRefresh(cj unsafe.Pointer, curveNID int, acBytes []byte, qu
 	// Convert Go slice to C array
 	cIndices := make([]C.int, len(quorumPartyIndices))
 	for i, idx := range quorumPartyIndices {
-		cIndices[i] = C.int(idx)
+		cIndices[i] = cIntFromLen(idx)
 	}
 
 	acMem := goBytesToCmem(acBytes)
@@ -1246,7 +1243,7 @@ func ECDSAMPThresholdRefresh(cj unsafe.Pointer, curveNID int, acBytes []byte, qu
 
 	var newKey ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_ecdsamp_threshold_refresh((*C.cbmpc_jobmp)(cj), C.int(curveNID), acMem, &cIndices[0], C.int(len(cIndices)), sidMem, key, &sidOut, &newKey)
+	rc := C.cbmpc_ecdsamp_threshold_refresh((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), acMem, &cIndices[0], cIntFromLen(len(cIndices)), sidMem, key, &sidOut, &newKey)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("ecdsamp_threshold_refresh", rc)
 	}
@@ -1268,7 +1265,7 @@ func Schnorr2PDKG(cj unsafe.Pointer, curveNID int) (Schnorr2PKey, error) {
 	}
 
 	var key Schnorr2PKey
-	rc := C.cbmpc_schnorr2p_dkg((*C.cbmpc_job2p)(cj), C.int(curveNID), &key)
+	rc := C.cbmpc_schnorr2p_dkg((*C.cbmpc_job2p)(cj), cIntFromLen(curveNID), &key)
 	if rc != 0 {
 		return nil, formatNativeErr("schnorr2p_dkg", rc)
 	}
@@ -1371,7 +1368,7 @@ func Schnorr2PSign(cj unsafe.Pointer, key Schnorr2PKey, msg []byte, variant Schn
 	defer freeCmem(msgMem)
 
 	var sigOut C.cmem_t
-	rc := C.cbmpc_schnorr2p_sign((*C.cbmpc_job2p)(cj), key, msgMem, C.int(variant), &sigOut)
+	rc := C.cbmpc_schnorr2p_sign((*C.cbmpc_job2p)(cj), key, msgMem, cIntFromLen(int(variant)), &sigOut)
 	if rc != 0 {
 		return nil, formatNativeErr("schnorr2p_sign", rc)
 	}
@@ -1396,7 +1393,7 @@ func Schnorr2PSignBatch(cj unsafe.Pointer, key Schnorr2PKey, msgs [][]byte, vari
 	defer freeCmems(msgsMem)
 
 	var sigsOut C.cmems_t
-	rc := C.cbmpc_schnorr2p_sign_batch((*C.cbmpc_job2p)(cj), key, msgsMem, C.int(variant), &sigsOut)
+	rc := C.cbmpc_schnorr2p_sign_batch((*C.cbmpc_job2p)(cj), key, msgsMem, cIntFromLen(int(variant)), &sigsOut)
 	if rc != 0 {
 		return nil, formatNativeErr("schnorr2p_sign_batch", rc)
 	}
@@ -1417,7 +1414,7 @@ func SchnorrMPDKG(cj unsafe.Pointer, curveNID int) (ECDSAMPKey, []byte, error) {
 
 	var key ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_schnorrmp_dkg((*C.cbmpc_jobmp)(cj), C.int(curveNID), &key, &sidOut)
+	rc := C.cbmpc_schnorrmp_dkg((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), &key, &sidOut)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("schnorrmp_dkg", rc)
 	}
@@ -1467,7 +1464,7 @@ func SchnorrMPSign(cj unsafe.Pointer, key ECDSAMPKey, msg []byte, sigReceiver in
 	defer freeCmem(msgMem)
 
 	var sigOut C.cmem_t
-	rc := C.cbmpc_schnorrmp_sign((*C.cbmpc_jobmp)(cj), key, msgMem, C.int(sigReceiver), C.int(variant), &sigOut)
+	rc := C.cbmpc_schnorrmp_sign((*C.cbmpc_jobmp)(cj), key, msgMem, cIntFromLen(sigReceiver), cIntFromLen(int(variant)), &sigOut)
 	if rc != 0 {
 		return nil, formatNativeErr("schnorrmp_sign", rc)
 	}
@@ -1493,7 +1490,7 @@ func SchnorrMPSignBatch(cj unsafe.Pointer, key ECDSAMPKey, msgs [][]byte, sigRec
 	defer freeCmems(msgsMem)
 
 	var sigsOut C.cmems_t
-	rc := C.cbmpc_schnorrmp_sign_batch((*C.cbmpc_jobmp)(cj), key, msgsMem, C.int(sigReceiver), C.int(variant), &sigsOut)
+	rc := C.cbmpc_schnorrmp_sign_batch((*C.cbmpc_jobmp)(cj), key, msgsMem, cIntFromLen(sigReceiver), cIntFromLen(int(variant)), &sigsOut)
 	if rc != 0 {
 		return nil, formatNativeErr("schnorrmp_sign_batch", rc)
 	}
@@ -1517,14 +1514,14 @@ func SchnorrMPThresholdDKG(cj unsafe.Pointer, curveNID int, acBytes []byte, quor
 	// Convert Go slice to C array
 	cIndices := make([]C.int, len(quorumPartyIndices))
 	for i, idx := range quorumPartyIndices {
-		cIndices[i] = C.int(idx)
+		cIndices[i] = cIntFromLen(idx)
 	}
 
 	acMem := goBytesToCmem(acBytes)
 
 	var key ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_schnorrmp_threshold_dkg((*C.cbmpc_jobmp)(cj), C.int(curveNID), acMem, &cIndices[0], C.int(len(cIndices)), &key, &sidOut)
+	rc := C.cbmpc_schnorrmp_threshold_dkg((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), acMem, &cIndices[0], cIntFromLen(len(cIndices)), &key, &sidOut)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("schnorrmp_threshold_dkg", rc)
 	}
@@ -1552,7 +1549,7 @@ func SchnorrMPThresholdRefresh(cj unsafe.Pointer, curveNID int, acBytes []byte, 
 	// Convert Go slice to C array
 	cIndices := make([]C.int, len(quorumPartyIndices))
 	for i, idx := range quorumPartyIndices {
-		cIndices[i] = C.int(idx)
+		cIndices[i] = cIntFromLen(idx)
 	}
 
 	acMem := goBytesToCmem(acBytes)
@@ -1563,7 +1560,7 @@ func SchnorrMPThresholdRefresh(cj unsafe.Pointer, curveNID int, acBytes []byte, 
 
 	var newKey ECDSAMPKey
 	var sidOut C.cmem_t
-	rc := C.cbmpc_schnorrmp_threshold_refresh((*C.cbmpc_jobmp)(cj), C.int(curveNID), acMem, &cIndices[0], C.int(len(cIndices)), sidMem, key, &sidOut, &newKey)
+	rc := C.cbmpc_schnorrmp_threshold_refresh((*C.cbmpc_jobmp)(cj), cIntFromLen(curveNID), acMem, &cIndices[0], cIntFromLen(len(cIndices)), sidMem, key, &sidOut, &newKey)
 	if rc != 0 {
 		return nil, nil, formatNativeErr("schnorrmp_threshold_refresh", rc)
 	}
@@ -1579,7 +1576,7 @@ func SchnorrMPThresholdRefresh(cj unsafe.Pointer, curveNID int, acBytes []byte, 
 // Returns scalar bytes in big-endian format.
 func CurveRandomScalar(curveNID int) ([]byte, error) {
 	var scalarOut C.cmem_t
-	rc := C.cbmpc_curve_random_scalar(C.int(curveNID), &scalarOut)
+	rc := C.cbmpc_curve_random_scalar(cIntFromLen(curveNID), &scalarOut)
 	if rc != 0 {
 		return nil, formatNativeErr("curve_random_scalar", rc)
 	}
@@ -1590,7 +1587,7 @@ func CurveRandomScalar(curveNID int) ([]byte, error) {
 // The returned ECCPoint must be freed by the caller.
 func CurveGetGenerator(curveNID int) (ECCPoint, error) {
 	var generatorOut C.cbmpc_ecc_point
-	rc := C.cbmpc_curve_get_generator(C.int(curveNID), &generatorOut)
+	rc := C.cbmpc_curve_get_generator(cIntFromLen(curveNID), &generatorOut)
 	if rc != 0 {
 		return nil, formatNativeErr("curve_get_generator", rc)
 	}
@@ -1607,7 +1604,7 @@ func CurveMulGenerator(curveNID int, scalarBytes []byte) (ECCPoint, error) {
 
 	scalarMem := goBytesToCmem(scalarBytes)
 	var pointOut C.cbmpc_ecc_point
-	rc := C.cbmpc_curve_mul_generator(C.int(curveNID), scalarMem, &pointOut)
+	rc := C.cbmpc_curve_mul_generator(cIntFromLen(curveNID), scalarMem, &pointOut)
 	if rc != 0 {
 		return nil, formatNativeErr("curve_mul_generator", rc)
 	}
@@ -1667,7 +1664,7 @@ func ScalarAdd(scalarABytes, scalarBBytes []byte, curveNID int) ([]byte, error) 
 	scalarBMem := goBytesToCmem(scalarBBytes)
 
 	var resultOut C.cmem_t
-	rc := C.cbmpc_scalar_add(scalarAMem, scalarBMem, C.int(curveNID), &resultOut)
+	rc := C.cbmpc_scalar_add(scalarAMem, scalarBMem, cIntFromLen(curveNID), &resultOut)
 	if rc != 0 {
 		return nil, formatNativeErr("scalar_add", rc)
 	}
@@ -1993,7 +1990,7 @@ func ACAnd(children []ACNode) (ACNode, error) {
 	}
 
 	var node ACNode
-	rc := C.cbmpc_ac_and(&cChildren[0], C.int(len(cChildren)), &node)
+	rc := C.cbmpc_ac_and(&cChildren[0], cIntFromLen(len(cChildren)), &node)
 	if rc != 0 {
 		return nil, formatNativeErr("ac_and", rc)
 	}
@@ -2019,7 +2016,7 @@ func ACOr(children []ACNode) (ACNode, error) {
 	}
 
 	var node ACNode
-	rc := C.cbmpc_ac_or(&cChildren[0], C.int(len(cChildren)), &node)
+	rc := C.cbmpc_ac_or(&cChildren[0], cIntFromLen(len(cChildren)), &node)
 	if rc != 0 {
 		return nil, formatNativeErr("ac_or", rc)
 	}
@@ -2051,7 +2048,7 @@ func ACThreshold(k int, children []ACNode) (ACNode, error) {
 	}
 
 	var node ACNode
-	rc := C.cbmpc_ac_threshold(C.int(k), &cChildren[0], C.int(len(cChildren)), &node)
+	rc := C.cbmpc_ac_threshold(cIntFromLen(k), &cChildren[0], cIntFromLen(len(cChildren)), &node)
 	if rc != 0 {
 		return nil, formatNativeErr("ac_threshold", rc)
 	}
@@ -2173,7 +2170,7 @@ func PVEACEncrypt(k KEM, acBytes []byte, pathToEK map[string][]byte, label []byt
 	defer freeCmems(xScalarsMem)
 
 	var out C.cmem_t
-	rc := C.cbmpc_pve_ac_encrypt(acMem, pathsMem, eksMem, labelMem, C.int(curveNID), xScalarsMem, &out)
+	rc := C.cbmpc_pve_ac_encrypt(acMem, pathsMem, eksMem, labelMem, cIntFromLen(curveNID), xScalarsMem, &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_ac_encrypt", rc)
 	}
@@ -2239,7 +2236,7 @@ func PVEACVerify(k KEM, acBytes []byte, pathToEK map[string][]byte, pveCT []byte
 	pveCTMem := goBytesToCmem(pveCT)
 	labelMem := goBytesToCmem(label)
 
-	rc := C.cbmpc_pve_ac_verify(acMem, pathsMem, eksMem, pveCTMem, &cPoints[0], C.int(len(cPoints)), labelMem)
+	rc := C.cbmpc_pve_ac_verify(acMem, pathsMem, eksMem, pveCTMem, &cPoints[0], cIntFromLen(len(cPoints)), labelMem)
 	if rc != 0 {
 		return formatNativeErr("pve_ac_verify", rc)
 	}
@@ -2288,7 +2285,7 @@ func PVEACPartyDecryptRow(k KEM, acBytes []byte, rowIndex int, path string, dkHa
 	labelMem := goBytesToCmem(label)
 
 	var out C.cmem_t
-	rc := C.cbmpc_pve_ac_party_decrypt_row(acMem, C.int(rowIndex), pathMem, dkHandle, pveCTMem, labelMem, &out)
+	rc := C.cbmpc_pve_ac_party_decrypt_row(acMem, cIntFromLen(rowIndex), pathMem, dkHandle, pveCTMem, labelMem, &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_ac_party_decrypt_row", rc)
 	}
@@ -2361,7 +2358,7 @@ func PVEACAggregateToRestoreRow(k KEM, acBytes []byte, rowIndex int, label []byt
 	}
 
 	var out C.cmems_t
-	rc := C.cbmpc_pve_ac_aggregate_to_restore_row(acMem, C.int(rowIndex), labelMem, quorumPathsMem, quorumSharesMem, pveCTMem, allPathsMem, allEksMem, &out)
+	rc := C.cbmpc_pve_ac_aggregate_to_restore_row(acMem, cIntFromLen(rowIndex), labelMem, quorumPathsMem, quorumSharesMem, pveCTMem, allPathsMem, allEksMem, &out)
 	if rc != 0 {
 		return nil, formatNativeErr("pve_ac_aggregate_to_restore_row", rc)
 	}

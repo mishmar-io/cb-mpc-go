@@ -7,7 +7,9 @@
 //   - bindings_types.go: Type conversions (cmemToGoBytes) and common types
 //   - bindings_job.go: Transport interface, handle registry, CGO export callbacks, and job lifecycle management
 //   - bindings_protocol.go: MPC protocol implementations (AgreeRandom2P, AgreeRandomMP)
-//   - bindings_stub.go: Stub implementations for non-CGO builds or Windows
+//
+// This package requires CGO and is not supported on Windows. Attempting to build
+// without CGO or on Windows will result in a compile-time error.
 package backend
 
 /*

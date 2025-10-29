@@ -1,7 +1,5 @@
 package cbmpc
 
-import "github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
-
 var (
 	// Version is the wrapper version populated at build time via -ldflags.
 	Version = "v0.0.0-in-progress"
@@ -17,11 +15,7 @@ func WrapperVersion() string {
 	return Version
 }
 
-// UpstreamVersion returns the version string reported by the native bindings if
-// available; otherwise it falls back to the pinned upstream commit SHA.
+// UpstreamVersion returns the pinned upstream commit SHA embedded via ldflags.
 func UpstreamVersion() string {
-	if v := backend.Version(); v != "" {
-		return v
-	}
 	return UpstreamSHA
 }

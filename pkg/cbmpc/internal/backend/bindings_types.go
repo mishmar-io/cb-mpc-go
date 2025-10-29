@@ -14,6 +14,7 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -23,6 +24,86 @@ const (
 	// EECDSA2PBitLeak is returned when a bit leak is detected during ECDSA 2P verification.
 	EECDSA2PBitLeak = 0xff040002
 )
+
+// maxCInt is the maximum value representable by C.int on supported targets (32-bit signed).
+const maxCInt = (1 << 31) - 1
+
+// ============================================================
+// Safe conversion helpers for CGO boundaries
+// ============================================================
+
+// cIntFromLen converts a non-negative Go int (typically a length) into C.int with range checks.
+func cIntFromLen(n int) C.int {
+	if n < 0 || n > maxCInt {
+		panic("cIntFromLen: value out of C.int range")
+	}
+	// #nosec G115 -- CGO boundary: range-checked conversion to C.int
+	return C.int(n)
+}
+
+// cSizeFromLen converts a non-negative Go int (typically a length) into C.size_t with checks.
+func cSizeFromLen(n int) C.size_t {
+	if n < 0 {
+		panic("cSizeFromLen: negative size")
+	}
+	// #nosec G115 -- CGO boundary: range-checked conversion to C.size_t
+	return C.size_t(n)
+}
+
+// formatNativeErr formats a native error code with category and code fields.
+func formatNativeErr(op string, rc C.int) error {
+	u := uint32(rc) // #nosec G115 -- C.int to uint32 for bitfield formatting only
+	return fmt.Errorf("%s failed with code %d (0x%x, cat=0x%x, code=0x%x)", op, int(rc), u, (u>>16)&0xff, u&0xffff)
+}
+
+// isEECDSA2PBitLeakRC reports whether rc corresponds to EECDSA2PBitLeak.
+func isEECDSA2PBitLeakRC(rc C.int) bool {
+	// #nosec G115 -- comparing error domain constants across CGO boundary
+	return C.uint(rc) == C.uint(EECDSA2PBitLeak)
+}
+
+// cSizeFromCInt converts C.int size values to C.size_t safely.
+func cSizeFromCInt(n C.int) C.size_t {
+	if n < 0 {
+		panic("cSizeFromCInt: negative size")
+	}
+	// #nosec G115 -- CGO boundary: range-checked conversion to C.size_t
+	return C.size_t(n)
+}
+
+// goBytesFromSizeT converts a C buffer and a C.size_t length into a Go byte slice with checks.
+func goBytesFromSizeT(ptr unsafe.Pointer, n C.size_t) []byte {
+	if n > C.size_t(maxCInt) {
+		panic("goBytesFromSizeT: length exceeds C.int range for GoBytes")
+	}
+	// #nosec G115 -- CGO boundary: range-checked conversion to C.int
+	return C.GoBytes(ptr, C.int(n))
+}
+
+// goBytesFromInt converts a C buffer and a Go int length into a Go byte slice with checks.
+func goBytesFromInt(ptr unsafe.Pointer, n int) []byte {
+	if n < 0 || n > maxCInt {
+		panic("goBytesFromInt: length exceeds C.int range for GoBytes")
+	}
+	// #nosec G115 -- CGO boundary: range-checked conversion to C.int
+	return C.GoBytes(ptr, C.int(n))
+}
+
+// intFromCInt converts C.int to Go int with a non-negative check.
+func intFromCInt(n C.int) int {
+	if n < 0 {
+		panic("intFromCInt: negative value")
+	}
+	return int(n)
+}
+
+// intFromSizeT converts C.size_t to Go int with an upper bound check.
+func intFromSizeT(n C.size_t) int {
+	if n > C.size_t(maxCInt) {
+		panic("intFromSizeT: value exceeds supported range")
+	}
+	return int(n) // #nosec G115 -- range-checked conversion from size_t to int
+}
 
 // cmemToGoBytes converts a C.cmem_t to a Go []byte slice and takes ownership of the C memory.
 // Securely zeros and frees the C memory. Caller must not access the C memory after calling.
@@ -37,7 +118,7 @@ func cmemToGoBytes(cmem C.cmem_t) []byte {
 	result := C.GoBytes(unsafe.Pointer(cmem.data), cmem.size)
 
 	if cmem.size > 0 {
-		C.memset(unsafe.Pointer(cmem.data), 0, C.size_t(cmem.size))
+		C.memset(unsafe.Pointer(cmem.data), 0, cSizeFromCInt(cmem.size))
 	}
 	C.free(unsafe.Pointer(cmem.data))
 
@@ -59,17 +140,17 @@ func cmemsToGoByteSlices(cmems C.cmems_t) [][]byte {
 	result := make([][]byte, cmems.count)
 	offset := 0
 	for i := range result {
-		size := int(cSizesArray[i])
+		size := intFromCInt(cSizesArray[i])
 		if size > 0 && cmems.data != nil {
 			// Copy the data for this element
-			result[i] = C.GoBytes(unsafe.Pointer(uintptr(unsafe.Pointer(cmems.data))+uintptr(offset)), C.int(size))
+			result[i] = goBytesFromInt(unsafe.Pointer(uintptr(unsafe.Pointer(cmems.data))+uintptr(offset)), size)
 			offset += size
 		}
 	}
 
 	// Securely zero and free the memory
 	if cmems.data != nil && offset > 0 {
-		C.memset(unsafe.Pointer(cmems.data), 0, C.size_t(offset))
+		C.memset(unsafe.Pointer(cmems.data), 0, cSizeFromLen(offset))
 		C.free(unsafe.Pointer(cmems.data))
 	}
 	if cmems.sizes != nil {
@@ -88,7 +169,7 @@ func cmemsToGoByteSlices(cmems C.cmems_t) [][]byte {
 // See "Go to C Memory Conversion" in CLAUDE.md for decision criteria.
 func goBytesToCmem(data []byte) C.cmem_t {
 	var cmem C.cmem_t
-	cmem.size = C.int(len(data))
+	cmem.size = cIntFromLen(len(data))
 	if len(data) > 0 {
 		cmem.data = (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	} else {
@@ -120,11 +201,11 @@ func goBytesSliceToCmems(slices [][]byte) C.cmems_t {
 	// Allocate contiguous buffer for all data
 	var data *C.uint8_t
 	if totalSize > 0 {
-		data = (*C.uint8_t)(C.malloc(C.size_t(totalSize)))
+		data = (*C.uint8_t)(C.malloc(cSizeFromLen(totalSize)))
 	}
 
 	// Allocate sizes array
-	sizes := (*C.int)(C.malloc(C.size_t(len(slices)) * C.size_t(unsafe.Sizeof(C.int(0)))))
+	sizes := (*C.int)(C.malloc(cSizeFromLen(len(slices)) * C.size_t(unsafe.Sizeof(C.int(0)))))
 
 	// OOM check: if allocation failed for sizes or for data (when totalSize > 0),
 	// return an empty cmems to signal error to the C side
@@ -142,13 +223,13 @@ func goBytesSliceToCmems(slices [][]byte) C.cmems_t {
 	offset := 0
 	for i, slice := range slices {
 		sizePtr := (*C.int)(unsafe.Pointer(uintptr(unsafe.Pointer(sizes)) + uintptr(i)*unsafe.Sizeof(C.int(0))))
-		*sizePtr = C.int(len(slice))
+		*sizePtr = cIntFromLen(len(slice))
 
 		if len(slice) > 0 && data != nil {
 			C.memcpy(
 				unsafe.Pointer(uintptr(unsafe.Pointer(data))+uintptr(offset)),
 				unsafe.Pointer(&slice[0]),
-				C.size_t(len(slice)),
+				cSizeFromLen(len(slice)),
 			)
 			offset += len(slice)
 		}
@@ -156,7 +237,7 @@ func goBytesSliceToCmems(slices [][]byte) C.cmems_t {
 
 	cmems.data = data
 	cmems.sizes = sizes
-	cmems.count = C.int(len(slices))
+	cmems.count = cIntFromLen(len(slices))
 	return cmems
 }
 
@@ -184,10 +265,10 @@ func allocCmem(data []byte) C.cmem_t {
 		return cmem
 	}
 
-	cmem.size = C.int(len(data))
-	cmem.data = (*C.uint8_t)(C.malloc(C.size_t(len(data))))
+	cmem.size = cIntFromLen(len(data))
+	cmem.data = (*C.uint8_t)(C.malloc(cSizeFromLen(len(data))))
 	if cmem.data != nil {
-		C.memcpy(unsafe.Pointer(cmem.data), unsafe.Pointer(&data[0]), C.size_t(len(data)))
+		C.memcpy(unsafe.Pointer(cmem.data), unsafe.Pointer(&data[0]), cSizeFromLen(len(data)))
 	}
 	return cmem
 }
@@ -197,7 +278,7 @@ func allocCmem(data []byte) C.cmem_t {
 // on cmem values that point into Go memory (e.g., produced by goBytesToCmem).
 func freeCmem(cmem C.cmem_t) {
 	if cmem.data != nil && cmem.size > 0 {
-		C.memset(unsafe.Pointer(cmem.data), 0, C.size_t(cmem.size))
+		C.memset(unsafe.Pointer(cmem.data), 0, cSizeFromCInt(cmem.size))
 		C.free(unsafe.Pointer(cmem.data))
 	}
 }
@@ -435,7 +516,7 @@ func ECCPointFromBytes(curveNID int, bytes []byte) (ECCPoint, error) {
 	bytesMem := goBytesToCmem(bytes)
 
 	var point ECCPoint
-	rc := C.cbmpc_ecc_point_from_bytes(C.int(curveNID), bytesMem, &point)
+	rc := C.cbmpc_ecc_point_from_bytes(cIntFromLen(curveNID), bytesMem, &point)
 	if rc != 0 {
 		return nil, errors.New("ecc_point_from_bytes failed")
 	}
@@ -522,7 +603,7 @@ func ECElGamalCommitmentFromBytes(curveNID int, bytes []byte) (ECElGamalCommitme
 	bytesMem := goBytesToCmem(bytes)
 
 	var commitment ECElGamalCommitment
-	rc := C.cbmpc_ec_elgamal_commitment_from_bytes(C.int(curveNID), bytesMem, &commitment)
+	rc := C.cbmpc_ec_elgamal_commitment_from_bytes(cIntFromLen(curveNID), bytesMem, &commitment)
 	if rc != 0 {
 		return nil, errors.New("ec_elgamal_commitment_from_bytes failed")
 	}
@@ -623,7 +704,7 @@ func lookupHandle(handle unsafe.Pointer) (any, bool) {
 		return nil, false
 	}
 
-	id := uint64(uintptr(handle))
+	id := uint64(uintptr(handle)) // #nosec G115 // Pointer-to-uint64 conversion for handle registry
 
 	handleRegistryMu.RLock()
 	defer handleRegistryMu.RUnlock()
@@ -638,7 +719,7 @@ func freeHandle(handle unsafe.Pointer) {
 		return
 	}
 
-	id := uint64(uintptr(handle))
+	id := uint64(uintptr(handle)) // #nosec G115 // Pointer-to-uint64 conversion for handle registry
 
 	handleRegistryMu.Lock()
 	defer handleRegistryMu.Unlock()

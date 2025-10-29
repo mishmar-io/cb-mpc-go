@@ -1,3 +1,5 @@
+//go:build cgo && !windows
+
 package cbmpc
 
 import (
@@ -13,10 +15,12 @@ import (
 // in such environments.
 var ErrNotBuilt = errors.New("cbmpc: native bindings not built")
 
-// ErrBitLeak indicates a signature verification failure in global abort mode,
-// which may leak information about the private key. This error requires special
-// handling - the key should be refreshed before signing again.
-var ErrBitLeak = errors.New("bit leak detected in signature verification")
+// ErrMustLock indicates a signature verification failure in global abort mode,
+// which may leak a single bit of information about the private key.
+// This error requires special handling: the key should be treated as compromised and not used further.
+// Do not use it further; halt any ongoing or parallel signing processes and begin
+// an incident investigation, with particular focus on the counterparty.
+var ErrMustLock = errors.New("potential bit leak of private key detected in signature verification")
 
 // RemapError converts bindings layer errors to public API errors.
 // This is exported for use by protocol subpackages.
@@ -28,10 +32,10 @@ func RemapError(err error) error {
 	if errors.Is(err, backend.ErrNotBuilt) {
 		return ErrNotBuilt
 	}
-	// Map bindings.ErrBitLeak to public ErrBitLeak using errors.Is to avoid
+	// Map bindings.ErrMustLock to public ErrMustLock using errors.Is to avoid
 	// string comparison fragility.
-	if errors.Is(err, backend.ErrBitLeak) {
-		return ErrBitLeak
+	if errors.Is(err, backend.ErrMustLock) {
+		return ErrMustLock
 	}
 	return err
 }

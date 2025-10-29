@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+.DEFAULT_GOAL := help
 
 CBMPC_USE_DOCKER ?= 0
 BUILD_TYPE ?= Release
@@ -9,7 +10,7 @@ GO_LINT_TARGETS := ./pkg/...
 GOLANGCI_CONFIG := .golangci.yml
 GOVULNCHECK_VERSION := latest
 GOSEC_VERSION := v2.22.9
-GOSEC_EXCLUDES := -exclude-dir=cb-mpc -exclude-dir=build -exclude-dir=pkg/cbmpc/internal/cgo
+GOSEC_EXCLUDES := -exclude-dir=cb-mpc -exclude-dir=build -exclude-generated
 TOOLS_BIN := $(abspath build/tools/bin)
 DEFAULT_GOSEC := $(TOOLS_BIN)/gosec
 GOSEC_BIN ?=
@@ -48,6 +49,18 @@ help:
 	  /^\.PHONY:/ {target=$$2} \
 	  /^## / {if (target != "") {printf "  %-18s %s\n", target, substr($$0,4); target=""}}' $(MAKEFILE_LIST)
 
+.PHONY: version
+## Print version information for both wrapper and upstream cb-mpc.
+version:
+	@echo "Wrapper Version:   $(WRAPPER_VERSION)"
+	@echo "Upstream SHA:      $(UPSTREAM_SHA)"
+	@echo "Upstream Dir:      $(UPSTREAM_DIR)"
+
+.PHONY: print-ldflags
+## Print the ldflags that embed version metadata for go build/test/run.
+print-ldflags:
+	@echo $(GO_LDFLAGS)
+
 .PHONY: bootstrap
 ## Initialize Git LFS, sync submodules, and build cb-mpc once.
 bootstrap:
@@ -83,12 +96,12 @@ vuln: build-cbmpc
 	GOTOOLCHAIN=go1.25.2 GOFLAGS=-mod=mod $(GO_RUNNER) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(VULN_PACKAGES)
 
 .PHONY: sec
-## Run gosec with exclusions for generated cgo stubs and vendored code.
+## Run gosec security analysis with exclusions for vendored code.
 sec: build-cbmpc
 ifeq ($(strip $(SEC_GOSEC)),)
 	@echo "gosec binary not found; run 'make tools' or set GOSEC_BIN" >&2
 else
-	@PATH=$(GO_BIN_HOST):$(GO_BIN_DOCKER):$$PATH GO111MODULE=on CGO_ENABLED=0 GOFLAGS=-mod=mod $(SEC_GOSEC) $(GOSEC_EXCLUDES) $(SEC_PACKAGES)
+	@PATH=$(GO_BIN_HOST):$(GO_BIN_DOCKER):$$PATH GO111MODULE=on GOFLAGS=-mod=mod $(SEC_GOSEC) $(GOSEC_EXCLUDES) $(SEC_PACKAGES)
 endif
 
 .PHONY: check
@@ -131,6 +144,7 @@ $(CBMPC_STAMP): $(OPENSSL_LIB) $(addprefix cb-mpc/,$(CBMPC_SRC_FILES)) scripts/b
 	@mkdir -p $(dir $@)
 	@touch $@
 
+.PHONY: build-cbmpc
 ## Configure and build the cb-mpc static library from source without installing system-wide.
 build-cbmpc: $(CBMPC_STAMP)
 

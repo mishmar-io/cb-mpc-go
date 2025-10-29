@@ -353,7 +353,9 @@ func SignBatch(_ context.Context, j *cbmpc.Job2P, params *SignBatchParams) (*Sig
 }
 
 // SignWithGlobalAbort performs 2-party ECDSA signing with global abort mode.
-// Returns ErrBitLeak if signature verification fails (indicates potential key leak).
+// Returns ErrMustLock indicates potential leakage of a single bit of the key.
+// The caller must halt all other parallel signing operations and should not
+// initiate another signing operation until the error is investigated.
 //
 // Session ID semantics:
 //   - Empty SessionID (zero value): Library generates a fresh session ID
@@ -405,7 +407,9 @@ func SignWithGlobalAbort(_ context.Context, j *cbmpc.Job2P, params *SignParams) 
 }
 
 // SignWithGlobalAbortBatch performs 2-party ECDSA batch signing with global abort mode.
-// Returns ErrBitLeak if signature verification fails (indicates potential key leak).
+// Returns ErrMustLock indicates potential leakage of a single bit of the key.
+// The caller must halt all other parallel signing operations and should not
+// initiate another signing operation until the error is investigated.
 //
 // Session ID semantics:
 //   - Empty SessionID (zero value): Library generates a fresh session ID

@@ -98,7 +98,7 @@ func cbmpc_go_send(ctx unsafe.Pointer, to C.uint32_t, ptr *C.uint8_t, n C.size_t
 	if !ok {
 		return 1
 	}
-	msg := C.GoBytes(unsafe.Pointer(ptr), C.int(n))
+	msg := goBytesFromSizeT(unsafe.Pointer(ptr), n)
 	if err := t.Send(context.Background(), uint32(to), msg); err != nil {
 		return 1
 	}
@@ -121,14 +121,14 @@ func cbmpc_go_receive(ctx unsafe.Pointer, from C.uint32_t, out *C.cmem_t) C.int 
 	}
 	var p *C.uint8_t
 	if len(msg) > 0 {
-		p = (*C.uint8_t)(C.malloc(C.size_t(len(msg))))
+		p = (*C.uint8_t)(C.malloc(cSizeFromLen(len(msg))))
 		if p == nil {
 			return 1
 		}
-		C.memcpy(unsafe.Pointer(p), unsafe.Pointer(&msg[0]), C.size_t(len(msg)))
+		C.memcpy(unsafe.Pointer(p), unsafe.Pointer(&msg[0]), cSizeFromLen(len(msg)))
 	}
 	out.data = p
-	out.size = C.int(len(msg))
+	out.size = cIntFromLen(len(msg))
 	return 0
 }
 
@@ -142,7 +142,7 @@ func cbmpc_go_receive_all(ctx unsafe.Pointer, from *C.uint32_t, n C.size_t, outs
 	if !ok {
 		return 1
 	}
-	count := int(n)
+	count := intFromSizeT(n)
 	roles := make([]uint32, count)
 	src := unsafe.Slice(from, count)
 	for i := range roles {
@@ -159,7 +159,7 @@ func cbmpc_go_receive_all(ctx unsafe.Pointer, from *C.uint32_t, n C.size_t, outs
 			// Cleanup already allocated memory on failure
 			for j := 0; j < i; j++ {
 				if dst[j].data != nil {
-					C.memset(unsafe.Pointer(dst[j].data), 0, C.size_t(dst[j].size))
+					C.memset(unsafe.Pointer(dst[j].data), 0, cSizeFromCInt(dst[j].size))
 					C.free(unsafe.Pointer(dst[j].data))
 				}
 				dst[j].data = nil
@@ -169,12 +169,12 @@ func cbmpc_go_receive_all(ctx unsafe.Pointer, from *C.uint32_t, n C.size_t, outs
 		}
 		var p *C.uint8_t
 		if len(data) > 0 {
-			p = (*C.uint8_t)(C.malloc(C.size_t(len(data))))
+			p = (*C.uint8_t)(C.malloc(cSizeFromLen(len(data))))
 			if p == nil {
 				// Cleanup already allocated memory on failure
 				for j := 0; j < i; j++ {
 					if dst[j].data != nil {
-						C.memset(unsafe.Pointer(dst[j].data), 0, C.size_t(dst[j].size))
+						C.memset(unsafe.Pointer(dst[j].data), 0, cSizeFromCInt(dst[j].size))
 						C.free(unsafe.Pointer(dst[j].data))
 					}
 					dst[j].data = nil
@@ -182,10 +182,10 @@ func cbmpc_go_receive_all(ctx unsafe.Pointer, from *C.uint32_t, n C.size_t, outs
 				}
 				return 1
 			}
-			C.memcpy(unsafe.Pointer(p), unsafe.Pointer(&data[0]), C.size_t(len(data)))
+			C.memcpy(unsafe.Pointer(p), unsafe.Pointer(&data[0]), cSizeFromLen(len(data)))
 		}
 		dst[i].data = p
-		dst[i].size = C.int(len(data))
+		dst[i].size = cIntFromLen(len(data))
 	}
 	return 0
 }
@@ -317,7 +317,7 @@ func NewJobMP(t transport, self uint32, names []string) (unsafe.Pointer, uintptr
 		namesPtr = (**C.char)(unsafe.Pointer(&cNames[0]))
 	}
 
-	cj := C.cbmpc_jobmp_new(&goTransport, C.uint32_t(self), C.size_t(len(cNames)), namesPtr)
+	cj := C.cbmpc_jobmp_new(&goTransport, C.uint32_t(self), cSizeFromLen(len(cNames)), namesPtr)
 	if cj == nil {
 		del(h)
 		return nil, 0, errJobMPNew

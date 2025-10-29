@@ -66,11 +66,97 @@ A production-focused Go wrapper around [Coinbase's cb-mpc](https://github.com/co
 
 - `make bootstrap` runs Git LFS setup, syncs submodules, and performs the initial cb-mpc build.
 - `make lint-fix` formats and auto-fixes lint findings when supported by `golangci-lint`.
-- `make vuln` executes `govulncheck ./...` with the pinned toolchain, while `make sec` wraps `gosec` with exclusions for generated cgo shims. Run `make tools` once to install the pinned security tools into `build/tools/bin`.
+- `make vuln` executes `govulncheck ./...` with the pinned toolchain, while `make sec` runs `gosec` security analysis on the codebase. Run `make tools` once to install the pinned security tools into `build/tools/bin`.
 - `make tidy-check` ensures `go.mod` and `go.sum` stay clean by running `go mod tidy` and failing on diffs.
 - `make clean` removes all generated build artefacts, including the local cb-mpc build directory.
 - Tool shims bootstrap pinned Go and `golangci-lint` toolchains automatically and keep separate caches per environment flavour (`*-host` vs `*-docker`) so you can switch between native macOS and Linux container runs without manual cleanup. Export `CBMPC_USE_DOCKER=1` to run the same workflow inside the dev container.
 - The `Dockerfile` mirrors the tooling used in CI, allowing local validation via `docker build .`.
+
+## Versioning
+
+This project tracks two versions:
+
+1. **Wrapper Version**: The version of this Go wrapper library
+2. **Upstream SHA**: The pinned commit of the cb-mpc C++ library (submodule)
+
+### Checking versions
+
+View current version information:
+
+```bash
+make version
+```
+
+This displays:
+- **Wrapper Version**: Derived from git tags using `git describe --tags --always --dirty`
+- **Upstream SHA**: The current commit hash of the `cb-mpc` submodule
+- **Upstream Dir**: The submodule directory name (typically `cb-mpc`)
+
+Both values are embedded into the compiled binary at build time via `-ldflags` and can be accessed programmatically:
+
+```go
+import "github.com/coinbase/cb-mpc-go/pkg/cbmpc"
+
+fmt.Println("Wrapper:", cbmpc.WrapperVersion())  // e.g., "v0.1.0" or "68dd572-dirty"
+fmt.Println("Upstream:", cbmpc.UpstreamVersion()) // e.g., "3aced93df47..."
+```
+
+### Embedding version info in your builds
+
+- **Make/test targets**: `make test` already passes the correct `-ldflags` so the values above are embedded.
+- **Examples**: `scripts/run_example.sh` now injects `-ldflags "$(make -s print-ldflags)"` automatically. To override, pass your own `-ldflags`.
+- **Manual builds/runs**: If you run `go` directly, pass the flags yourself:
+
+  ```bash
+  # Build
+  go build -ldflags "$(make -s print-ldflags)" ./...
+
+  # Run
+  go run -ldflags "$(make -s print-ldflags)" ./examples/agree-random-2p
+
+  # Or via our shim (adds pinned toolchain and CGO env)
+  scripts/run_with_go.sh build -ldflags "$(make -s print-ldflags)" ./...
+  ```
+
+- **Ensure tags are available**: The wrapper version comes from `git describe`. If you cloned without tags, run:
+
+  ```bash
+  git fetch --tags --force
+  ```
+
+  Then `make version` should reflect the expected tag.
+
+### Releasing a new version (for maintainers)
+
+To release a new version of the Go wrapper:
+
+1. **Update the submodule** (if needed) to pin a specific cb-mpc version:
+   ```bash
+   git submodule update --remote cb-mpc
+   git add cb-mpc
+   git commit -m "chore: update cb-mpc submodule to <commit-sha>"
+   ```
+
+2. **Create and push a semantic version tag**:
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+   The tag should follow [Semantic Versioning](https://semver.org/):
+   - `v0.x.y` for initial development (pre-1.0)
+   - `vX.Y.Z` for stable releases where:
+     - `X` = breaking changes
+     - `Y` = new features (backward compatible)
+     - `Z` = bug fixes
+
+3. **Verify the version**:
+   ```bash
+   make version
+   # Should show: Wrapper Version: v0.1.0
+   ```
+
+When users import specific versions via `go get github.com/coinbase/cb-mpc-go@v0.1.0`, Go will fetch both the tagged wrapper code and the pinned cb-mpc submodule commit automatically.
 
 ## Documentation
 

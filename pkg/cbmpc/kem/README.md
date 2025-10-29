@@ -256,7 +256,7 @@ This ensures:
 | **Linux** | ✅ Supported | amd64 and arm64 |
 | **Windows** | ❌ Unsupported | Build tags exclude Windows |
 
-The package uses `//go:build cgo && !windows` to exclude Windows builds. Attempting to use this package on Windows will result in stub implementations that return `ErrNotBuilt`.
+The package uses `//go:build cgo && !windows` to exclude Windows builds. Attempting to compile this package on Windows or without CGO will result in a compile-time error, as the package requires the C++ cb-mpc library.
 
 ---
 
