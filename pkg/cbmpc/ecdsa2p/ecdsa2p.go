@@ -8,6 +8,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/jobptr"
 )
 
 // Key represents a 2-party ECDSA key share.
@@ -143,7 +144,7 @@ func DKG(_ context.Context, j *cbmpc.Job2P, params *DKGParams) (*DKGResult, erro
 		return nil, errors.New("nil params")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +190,7 @@ func Refresh(_ context.Context, j *cbmpc.Job2P, params *RefreshParams) (*Refresh
 		return nil, errors.New("nil or closed key")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +260,7 @@ func Sign(_ context.Context, j *cbmpc.Job2P, params *SignParams) (*SignResult, e
 		return nil, errors.New("message hash exceeds curve order size")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +335,7 @@ func SignBatch(_ context.Context, j *cbmpc.Job2P, params *SignBatchParams) (*Sig
 		}
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +389,7 @@ func SignWithGlobalAbort(_ context.Context, j *cbmpc.Job2P, params *SignParams) 
 		return nil, errors.New("message hash exceeds curve order size")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +450,7 @@ func SignWithGlobalAbortBatch(_ context.Context, j *cbmpc.Job2P, params *SignBat
 		}
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}

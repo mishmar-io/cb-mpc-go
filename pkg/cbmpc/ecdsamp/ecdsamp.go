@@ -8,6 +8,7 @@ import (
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	ac "github.com/coinbase/cb-mpc-go/pkg/cbmpc/accessstructure"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/jobptr"
 )
 
 // Key represents a multi-party ECDSA key share.
@@ -147,7 +148,7 @@ func DKG(_ context.Context, j *cbmpc.JobMP, params *DKGParams) (*DKGResult, erro
 		return nil, errors.New("nil params")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +205,7 @@ func Refresh(_ context.Context, j *cbmpc.JobMP, params *RefreshParams) (*Refresh
 		return nil, errors.New("nil or closed key")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +270,7 @@ func Sign(_ context.Context, j *cbmpc.JobMP, params *SignParams) (*SignResult, e
 		return nil, errors.New("message hash exceeds curve order size")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +324,7 @@ func ThresholdDKG(_ context.Context, j *cbmpc.JobMP, params *ThresholdDKGParams)
 		return nil, errors.New("empty quorum party indices")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +393,7 @@ func ThresholdRefresh(_ context.Context, j *cbmpc.JobMP, params *ThresholdRefres
 		return nil, errors.New("empty quorum party indices")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}

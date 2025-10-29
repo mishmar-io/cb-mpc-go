@@ -7,6 +7,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/jobptr"
 )
 
 // Key represents a 2-party Schnorr key share (wraps eckey::key_share_2p_t).
@@ -145,7 +146,7 @@ func DKG(_ context.Context, j *cbmpc.Job2P, params *DKGParams) (*DKGResult, erro
 		return nil, errors.New("nil params")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func Sign(_ context.Context, j *cbmpc.Job2P, params *SignParams) (*SignResult, e
 		return nil, errors.New("BIP340 variant requires exactly 32-byte pre-hashed message")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +268,7 @@ func SignBatch(_ context.Context, j *cbmpc.Job2P, params *SignBatchParams) (*Sig
 		}
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}

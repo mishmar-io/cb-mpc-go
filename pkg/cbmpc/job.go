@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/jobptr"
 )
 
 var (
@@ -45,16 +46,16 @@ type JobMP struct {
 // the exported API idiomatic while avoiding a dependency cycle between pkg and
 // internal/bindings.
 type transportAdapter struct {
-	inner Transport
-	ctx   context.Context
+	transport Transport
+	ctx       context.Context
 }
 
 func (a transportAdapter) Send(_ context.Context, to uint32, msg []byte) error {
-	return a.inner.Send(a.ctx, RoleID(to), msg)
+	return a.transport.Send(a.ctx, RoleID(to), msg)
 }
 
 func (a transportAdapter) Receive(_ context.Context, from uint32) ([]byte, error) {
-	return a.inner.Receive(a.ctx, RoleID(from))
+	return a.transport.Receive(a.ctx, RoleID(from))
 }
 
 func (a transportAdapter) ReceiveAll(_ context.Context, from []uint32) (map[uint32][]byte, error) {
@@ -62,7 +63,7 @@ func (a transportAdapter) ReceiveAll(_ context.Context, from []uint32) (map[uint
 	for i, r := range from {
 		roles[i] = RoleID(r)
 	}
-	batch, err := a.inner.ReceiveAll(a.ctx, roles)
+	batch, err := a.transport.ReceiveAll(a.ctx, roles)
 	if err != nil {
 		return nil, err
 	}
@@ -99,32 +100,32 @@ func NewJob2PWithContext(ctx context.Context, t Transport, self Role, names [2]s
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	adapter := transportAdapter{inner: t, ctx: jobCtx}
+	adapter := transportAdapter{transport: t, ctx: jobCtx}
 	cjob, h, err := backend.NewJob2P(adapter, uint32(self.roleID()), []string{names[0], names[1]})
 	if err != nil {
 		cancel()
 		return nil, RemapError(err)
 	}
 
-	j := &Job2P{cptr: cjob, hptr: h, cancel: cancel}
-	runtime.SetFinalizer(j, func(j *Job2P) { _ = j.Close() })
-	return j, nil
+	job := &Job2P{cptr: cjob, hptr: h, cancel: cancel}
+	runtime.SetFinalizer(job, func(job *Job2P) { _ = job.Close() })
+	return job, nil
 }
 
 // Close releases native resources associated with the 2-party job.
-func (j *Job2P) Close() error {
-	if j == nil {
+func (job *Job2P) Close() error {
+	if job == nil {
 		return nil
 	}
-	j.closeOnce.Do(func() {
-		runtime.SetFinalizer(j, nil)
-		if j.cancel != nil {
-			j.cancel()
+	job.closeOnce.Do(func() {
+		runtime.SetFinalizer(job, nil)
+		if job.cancel != nil {
+			job.cancel()
 		}
-		backend.FreeJob2P(j.cptr, j.hptr)
-		j.cptr = nil
-		j.hptr = 0
-		j.cancel = nil
+		backend.FreeJob2P(job.cptr, job.hptr)
+		job.cptr = nil
+		job.hptr = 0
+		job.cancel = nil
 	})
 	return nil
 }
@@ -164,52 +165,63 @@ func NewJobMPWithContext(ctx context.Context, t Transport, self RoleID, names []
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	adapter := transportAdapter{inner: t, ctx: jobCtx}
+	adapter := transportAdapter{transport: t, ctx: jobCtx}
 	cjob, h, err := backend.NewJobMP(adapter, uint32(self), names)
 	if err != nil {
 		cancel()
 		return nil, RemapError(err)
 	}
 
-	j := &JobMP{cptr: cjob, hptr: h, cancel: cancel}
-	runtime.SetFinalizer(j, func(j *JobMP) { _ = j.Close() })
-	return j, nil
+	job := &JobMP{cptr: cjob, hptr: h, cancel: cancel}
+	runtime.SetFinalizer(job, func(job *JobMP) { _ = job.Close() })
+	return job, nil
 }
 
 // Close releases native resources associated with the n-party job.
-func (j *JobMP) Close() error {
-	if j == nil {
+func (job *JobMP) Close() error {
+	if job == nil {
 		return nil
 	}
-	j.closeOnce.Do(func() {
-		runtime.SetFinalizer(j, nil)
-		if j.cancel != nil {
-			j.cancel()
+	job.closeOnce.Do(func() {
+		runtime.SetFinalizer(job, nil)
+		if job.cancel != nil {
+			job.cancel()
 		}
-		backend.FreeJobMP(j.cptr, j.hptr)
-		j.cptr = nil
-		j.hptr = 0
-		j.cancel = nil
+		backend.FreeJobMP(job.cptr, job.hptr)
+		job.cptr = nil
+		job.hptr = 0
+		job.cancel = nil
 	})
 	return nil
 }
 
-// Ptr returns the unsafe pointer to the underlying C job.
-// This is exported for use by protocol subpackages.
-func (j *Job2P) Ptr() (unsafe.Pointer, error) {
-	if j == nil || j.cptr == nil {
-		return nil, ErrJobClosed
+func init() {
+	jobptr.Get = func(v any) (unsafe.Pointer, error) {
+		if j, ok := v.(interface {
+			ptr() (unsafe.Pointer, error)
+		}); ok {
+			return j.ptr()
+		}
+		return nil, fmt.Errorf("invalid job handle type %T", v)
 	}
-	return j.cptr, nil
 }
 
-// Ptr returns the unsafe pointer to the underlying C job.
-// This is exported for use by protocol subpackages.
-func (j *JobMP) Ptr() (unsafe.Pointer, error) {
-	if j == nil || j.cptr == nil {
+// ptr returns the unsafe pointer to the underlying C job.
+// For internal use by protocol subpackages via internal/jobptr.
+func (job *Job2P) ptr() (unsafe.Pointer, error) {
+	if job == nil || job.cptr == nil {
 		return nil, ErrJobClosed
 	}
-	return j.cptr, nil
+	return job.cptr, nil
+}
+
+// ptr returns the unsafe pointer to the underlying C job.
+// For internal use by protocol subpackages via internal/jobptr.
+func (job *JobMP) ptr() (unsafe.Pointer, error) {
+	if job == nil || job.cptr == nil {
+		return nil, ErrJobClosed
+	}
+	return job.cptr, nil
 }
 
 // SessionID represents an immutable session identifier for MPC protocols.

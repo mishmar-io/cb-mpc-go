@@ -7,6 +7,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/backend"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/internal/jobptr"
 )
 
 // AgreeRandom is a Go wrapper for coinbase::mpc::agree_random.
@@ -16,7 +17,7 @@ func AgreeRandom(_ context.Context, j *cbmpc.Job2P, bitlen int) ([]byte, error) 
 		return nil, errors.New("nil job")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +37,7 @@ func MultiAgreeRandom(_ context.Context, j *cbmpc.JobMP, bitlen int) ([]byte, er
 		return nil, errors.New("nil job")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func WeakMultiAgreeRandom(_ context.Context, j *cbmpc.JobMP, bitlen int) ([]byte
 		return nil, errors.New("nil job")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +78,7 @@ func MultiPairwiseAgreeRandom(_ context.Context, j *cbmpc.JobMP, bitlen int) ([]
 		return nil, errors.New("nil job")
 	}
 
-	ptr, err := j.Ptr()
+	ptr, err := jobptr.Ptr(j)
 	if err != nil {
 		return nil, err
 	}
