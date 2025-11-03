@@ -1,26 +1,29 @@
-// Package cbmpc provides Go bindings for the Coinbase cb-mpc library.
+// Package cbmpc provides an MPC API for Go.
 //
-// This package is a thin wrapper around the C++ MPC protocol implementations
-// in the cb-mpc submodule. It uses CGO to bridge between Go and C++.
+// It offers two integration paths:
+//  1. Native-backed protocols via CGO that wrap the C++ implementations in the
+//     cb-mpc submodule.
+//  2. Pure-Go protocols that communicate over a pluggable Transport.
 //
 // # Architecture
 //
-// The package is organized in layers:
-//   - pkg/cbmpc/ - Public Go API (this package)
-//   - pkg/cbmpc/internal/backend/ - CGO bindings layer
+// Layers:
+//   - pkg/cbmpc/ - Public Go API (jobs, roles, transport interface, protocols)
+//   - pkg/cbmpc/internal/backend/ - CGO bindings layer for native-backed jobs
 //   - cb-mpc/ - C++ MPC protocol implementations (git submodule)
+//   - pkg/cbmpc/transport/ - Transport implementations (e.g., mTLS, mocknet)
 //
 // # Build Requirements
 //
-// This package requires CGO and is not available on Windows. On non-CGO builds
-// or Windows, functions that require the native library return ErrNotBuilt.
+// CGO is required only for native-backed functionality. Pure-Go protocols and
+// transports do not require CGO.
 //
 // # Protocol Documentation
 //
-// Protocol details and specifications are documented in the C++ headers.
-// See cb-mpc/src/cbmpc/protocol/ for protocol implementations.
+// For native-backed protocols, see specifications under cb-mpc/src/cbmpc/.
+// For Go-native protocols, see subpackages under pkg/cbmpc/.
 //
-// # Example Usage
+// # Example Usage (Go-native protocol)
 //
 //	// Create a mock network for testing
 //	net := mocknet.New()
@@ -33,15 +36,15 @@
 //	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 //	defer cancel()
 //
-//	job1, _ := cbmpc.NewJob2P(transport1, cbmpc.RoleP1, names)
+//	job1, _ := cbmpc.NewGoJob2PWithContext(ctx, transport1, cbmpc.RoleP1, names)
 //	defer job1.Close()
 //
-//	job2, _ := cbmpc.NewJob2P(transport2, cbmpc.RoleP2, names)
+//	job2, _ := cbmpc.NewGoJob2PWithContext(ctx, transport2, cbmpc.RoleP2, names)
 //	defer job2.Close()
 //
-//	// Run protocol
-//	result1, _ := agreerandom.AgreeRandom(ctx, job1, 256)
-//	result2, _ := agreerandom.AgreeRandom(ctx, job2, 256)
+//	// Run Go-native agreerandom
+//	result1, _ := agreerandom.GoAgreeRandom(ctx, job1, 256)
+//	result2, _ := agreerandom.GoAgreeRandom(ctx, job2, 256)
 //
 // # Subpackages
 //
@@ -53,7 +56,8 @@
 //   - ecdsamp - Multi-party threshold ECDSA protocols
 //   - kem - Key Encapsulation Mechanism (KEM) for PVE
 //   - logging - Minimal logging facade (slog adapter)
-//   - mocknet - In-memory transport for tests and examples
+//   - transport/mocknet - In-memory transport for unit tests
+//   - transport/mtls - mTLS-based transport for real deployments
 //   - paillier - Homomorphic Paillier cryptosystem
 //   - pve - Publicly Verifiable Encryption
 //   - schnorr2p - 2-party Schnorr signature protocols

@@ -4,7 +4,7 @@ Generate certificates once:
 
 ```bash
 # From repository root
-scripts/run_with_go.sh run examples/tlsnet/cmd/gen-certs/main.go \
+scripts/run_with_go.sh run examples/certutil/cmd/gen-certs/main.go \
   --output examples/agree-random-2p/certs \
   --names p0,p1 \
   --localhost

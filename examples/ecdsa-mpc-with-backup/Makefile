@@ -33,7 +33,7 @@ certs:
 	else \
 	  echo "Generating TLS certificates for mTLS (4 parties)..."; \
 	  mkdir -p certs; \
-	  cd ../.. && scripts/run_with_go.sh run ./examples/tlsnet/cmd/gen-certs \
+	  cd ../.. && scripts/run_with_go.sh run ./examples/certutil/cmd/gen-certs \
 	    -names alice,bob,charlie,dave \
 	    -output examples/ecdsa-mpc-with-backup/certs \
 	    -localhost=true; \

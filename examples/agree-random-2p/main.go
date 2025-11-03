@@ -1,3 +1,5 @@
+//go:build cgo && !windows
+
 package main
 
 import (
@@ -9,9 +11,9 @@ import (
 	"time"
 
 	"github.com/coinbase/cb-mpc-go/examples/internal/config"
-	"github.com/coinbase/cb-mpc-go/examples/tlsnet"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/agreerandom"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mtls"
 )
 
 func main() {
@@ -62,13 +64,15 @@ func main() {
 		log.Fatalf("load CA: %v", err)
 	}
 
-	transport, err := tlsnet.New(tlsnet.Config{
-		Self:        selfIndex,
-		Names:       names,
-		Addresses:   addresses,
-		Certificate: cert,
-		RootCAs:     caPool,
-	})
+    parties := make([]mtls.Party, len(names))
+    for i := range names {
+        parties[i] = mtls.Party{Name: names[i], Address: addresses[i]}
+    }
+    transport, err := mtls.New(mtls.Config{
+        SelfIndex: selfIndex,
+        Parties:   parties,
+        TLS:       mtls.TLSConfig{Certificate: cert, RootCAs: caPool},
+    })
 	if err != nil {
 		log.Fatalf("start tls transport: %v", err)
 	}

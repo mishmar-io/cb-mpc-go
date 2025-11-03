@@ -2,7 +2,7 @@ package cbmpc
 
 var (
 	// Version is the wrapper version populated at build time via -ldflags.
-	Version = "v0.0.0-in-progress"
+	Version = "unspecified"
 	// UpstreamSHA is the pinned upstream cb-mpc commit used for builds.
 	UpstreamSHA = "unknown"
 	// UpstreamDir is the submodule directory name for the upstream tree.

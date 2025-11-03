@@ -1,3 +1,4 @@
+// Package mocknet provides an in-memory transport used in tests.
 package mocknet
 
 import (

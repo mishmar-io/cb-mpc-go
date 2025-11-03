@@ -11,7 +11,7 @@ import (
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/accessstructure"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsamp"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // TestECDSAMPThresholdDKG_ORNode mirrors ReconstructPubAdditiveShares_ORNode from test_ec_dkg.cpp

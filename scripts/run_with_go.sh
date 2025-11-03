@@ -37,12 +37,12 @@ if [[ "${CBMPC_USE_DOCKER:-0}" == "1" ]]; then
 fi
 
 # Establish required Go version early for subsequent comparisons
-GO_VERSION="${GO_VERSION:-1.25.2}"
+GO_VERSION="${GO_VERSION:-1.25.3}"
 
 if command -v go >/dev/null 2>&1; then
   # Prefer system Go only if it is recent enough; otherwise fall back to the pinned toolchain.
   SYS_GO_VER_RAW="$(go version | awk '{print $3}')"  # e.g. go1.24.2
-  REQ_GO_VER_RAW="go${GO_VERSION}"                  # e.g. go1.25.2
+  REQ_GO_VER_RAW="go${GO_VERSION}"                  # e.g. go1.25.3
   SYS_GO_VER_NUM="${SYS_GO_VER_RAW#go}"
   REQ_GO_VER_NUM="${REQ_GO_VER_RAW#go}"
   # Compare using sort -V: the lesser version will be first; if it's the system version, it's older.

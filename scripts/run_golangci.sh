@@ -34,7 +34,7 @@ if [[ "${CBMPC_USE_SYSTEM_GOLANGCI:-0}" == "1" ]] && command -v golangci-lint >/
   exec golangci-lint "$@"
 fi
 
-GO_VERSION="${GO_VERSION:-1.25.2}"
+GO_VERSION="${GO_VERSION:-1.25.3}"
 GO_ROOT="${CBMPC_GO_ROOT:-${PWD}/build/go-${ENV_FLAVOR}}"
 LOCAL_GO="${GO_ROOT}/go/bin/go"
 

@@ -222,8 +222,7 @@ func TestHandleValidation(t *testing.T) {
 	})
 }
 
-// TestDeterminismAndDomainSeparation tests the cryptographic properties
-// established in ticket #1: deterministic encryption and domain separation.
+// TestDeterminismAndDomainSeparation tests the deterministic encryption and domain separation.
 func TestDeterminismAndDomainSeparation(t *testing.T) {
 	t.Run("determinism: same (ek, rho) produces identical ciphertext", func(t *testing.T) {
 		kem, err := rsa.New(2048)

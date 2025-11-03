@@ -10,7 +10,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsa2p"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // TestSessionIDFresh tests that an empty SessionID results in a fresh session being created.

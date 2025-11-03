@@ -1,6 +1,6 @@
 # Threshold ECDSA MPC with PVE Backup Example
 
-This example demonstrates a production-grade implementation of multi-party ECDSA with secure key backup using Publicly Verifiable Encryption (PVE). It showcases the complete workflow from key generation to signing, with secure backup, recovery, and key refresh capabilities.
+This example demonstrates an implementation of multi-party ECDSA with secure key backup using Publicly Verifiable Encryption (PVE). It showcases the complete workflow from key generation to signing, with secure backup, recovery, and key refresh capabilities.
 
 ## Overview
 
@@ -14,32 +14,7 @@ This example implements:
 6. **Key Recovery**: Demonstration of secure key restoration from encrypted backup
 7. **Key Refresh**: Proactive security through periodic key share updates
 
-Unlike other examples that use mocknet, this example uses production-grade mTLS networking suitable for real-world deployments.
-
-## Features
-
-### Security Features
-- ✓ Mutual TLS (mTLS) authentication between parties
-- ✓ Certificate-based identity verification
-- ✓ Secure distributed key generation (no single point of trust)
-- ✓ Publicly verifiable encryption for backups
-- ✓ Memory zeroization of sensitive data
-- ✓ Production-ready network transport
-
-### Protocol Features
-- ✓ 4-of-4 ECDSA DKG on P-256
-- ✓ Access control structures (threshold, AND, OR gates)
-- ✓ Signing with all 4 parties online
-- ✓ PVE encryption/decryption
-- ✓ Ciphertext verification
-- ✓ Key recovery demonstration
-- ✓ Threshold key refresh (proactive security)
-
-## Prerequisites
-
-- Go 1.19 or later
-- CGO enabled (for cb-mpc bindings)
-- OpenSSL (for TLS)
+This example uses mTLS networking suitable for real-world deployments.
 
 ## Quick Start
 
@@ -200,15 +175,13 @@ This creates `backup-alice.hex` and `backup-bob.hex` files containing the PVE-en
 
 ### Network Layer
 
-The example uses the `tlsnet` package for mTLS-based communication:
+The example uses the `pkg/cbmpc/transport/mtls` transport for mTLS-based communication:
 
 ```go
-transport, err := tlsnet.New(tlsnet.Config{
-    Self:        selfIndex,
-    Names:       names,
-    Addresses:   addresses,
-    Certificate: cert,
-    RootCAs:     caPool,
+transport, err := mtls.New(mtls.Config{
+    SelfIndex: selfIndex,
+    Parties:   parties, // names+addresses mapped to mtls.Party
+    TLS:       mtls.TLSConfig{Certificate: cert, RootCAs: caPool},
 })
 ```
 
@@ -267,6 +240,9 @@ Features:
 - Key bytes are zeroized after use with `cbmpc.ZeroizeBytes()`
 - Scalars are zeroized with `scalar.Zeroize()`
 - Deferred cleanup ensures memory clearing on all paths
+- Resource cleanup with `defer`
+- Finalizers on C++ resources
+- Timeouts on all operations
 
 **Network Security:**
 - TLS 1.3 minimum version enforced
@@ -280,11 +256,6 @@ Features:
 - Backups are encrypted with KEM
 - Recovery requires private decryption key
 
-**Production Readiness:**
-- Proper error handling throughout
-- Timeouts on all operations
-- Resource cleanup with `defer`
-- Finalizers on C++ resources
 
 ## Protocol Details
 
@@ -311,16 +282,6 @@ Use cases:
 - Key escrow with third-party verification
 - Regulatory compliance (auditable backups)
 - Disaster recovery
-
-## Comparison with Other Examples
-
-| Feature | ecdsa-mpc-with-backup | agree-random-mp | pve |
-|---------|----------------------|-----------------|-----|
-| Network | mTLS (production) | mTLS | None (single-party) |
-| Protocol | ECDSA DKG + Sign | AgreeRandom | PVE only |
-| Threshold | 4-of-4 | N/A | 1 |
-| Parties | 4 | 3+ | 1 |
-| Key Refresh | Yes | No | No |
 
 ## Common Issues
 
@@ -370,7 +331,7 @@ This removes:
 - [Threshold ECDSA Multi-Party Protocol Details](../../pkg/cbmpc/ecdsamp/doc.go)
 - [Access Structure Documentation](../../pkg/cbmpc/accessstructure/doc.go)
 - [PVE Protocol Details](../../pkg/cbmpc/pve/doc.go)
-- [TLS Transport Implementation](../tlsnet/transport.go)
+- [mTLS Transport Implementation](../../pkg/cbmpc/transport/mtls)
 
 ## References
 

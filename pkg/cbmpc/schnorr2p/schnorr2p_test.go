@@ -12,8 +12,8 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	btcschnorr "github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/schnorr2p"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // TestSchnorr2PSignEdDSA tests Schnorr 2P signing with EdDSA variant (Ed25519).

@@ -9,7 +9,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsa2p"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // These tests verify that the MPC protocol handles adversarial scenarios gracefully.

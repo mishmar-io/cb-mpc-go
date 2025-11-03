@@ -12,5 +12,3 @@ bin/
 # Example build artifacts and generated files
 examples/**/build/
 examples/**/certs/*.pem
-examples/tlsnet/cmd/gen-certs/examples/
-

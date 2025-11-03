@@ -93,11 +93,11 @@ lint-fix:
 .PHONY: vuln
 ## Run govulncheck against the module packages.
 vuln: build-cbmpc
-	GOTOOLCHAIN=go1.25.2 GOFLAGS=-mod=mod $(GO_RUNNER) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(VULN_PACKAGES)
+	GOTOOLCHAIN=go1.25.3 GOFLAGS=-mod=mod $(GO_RUNNER) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(VULN_PACKAGES)
 
 .PHONY: sec
 ## Run gosec security analysis with exclusions for vendored code.
-sec: build-cbmpc
+sec: tools build-cbmpc
 ifeq ($(strip $(SEC_GOSEC)),)
 	@echo "gosec binary not found; run 'make tools' or set GOSEC_BIN" >&2
 else

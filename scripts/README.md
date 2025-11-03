@@ -9,7 +9,7 @@ This directory contains small utilities that standardize local and Docker-based 
 - **CBMPC_OPENSSL_ROOT**: Override the OpenSSL install prefix used by builds and CGO. Defaults to `build/openssl-<flavor>`.
 - **CBMPC_GOCACHE**, **CBMPC_GOMODCACHE**, **CBMPC_GOLANGCI_CACHE**: Optional cache overrides. Defaults live under `build/.cache/*-<flavor>`.
 - **CBMPC_GO_ROOT**: Directory where a pinned Go toolchain is installed if the system Go is too old. Default `build/go-<flavor>`.
-- **GO_VERSION**: Required Go version used by wrappers when pinning. Default `1.25.2`.
+- **GO_VERSION**: Required Go version used by wrappers when pinning. Default `1.25.3`.
 - **CBMPC_TOOLS_BIN**: Location to install local dev tools (e.g., `golangci-lint`). Default `build/bin-<flavor>`.
 - **CBMPC_USE_SYSTEM_GOLANGCI**: Set to `1` to prefer the system `golangci-lint` if present; default uses the pinned binary.
 - Docker-related (when CBMPC_USE_DOCKER=1):

@@ -11,8 +11,8 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/accessstructure"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/schnorrmp"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // TestSchnorrMPThresholdDKG_ORNode mirrors ReconstructPubAdditiveShares_ORNode from test_ec_dkg.cpp

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEST_ROOT="${1:-${PWD}/build/go}"
-VERSION="${2:-1.25.2}"
+VERSION="${2:-1.25.3}"
 
 INSTALL_DIR="${DEST_ROOT}/go"
 GO_BIN="${INSTALL_DIR}/bin/go"

@@ -10,7 +10,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/agreerandom"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 func TestAgreeRandom2PNative(t *testing.T) {

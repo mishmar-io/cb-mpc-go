@@ -8,7 +8,7 @@ import (
 
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsa2p"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // TestKeyBytesMutationProtection verifies that mutating the slice returned by

@@ -1,6 +1,6 @@
 module github.com/coinbase/cb-mpc-go
 
-go 1.25.2
+go 1.25.3
 
 require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5

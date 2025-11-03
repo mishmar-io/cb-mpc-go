@@ -15,7 +15,7 @@ import (
 	btcecdsa "github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsamp"
-	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/mocknet"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mocknet"
 )
 
 // abbrevHex returns an abbreviated hex string showing first 2 and last 2 bytes.
@@ -575,6 +575,8 @@ func TestECDSAMPSign(t *testing.T) {
 
 	// Only Party 0 (sig_receiver) receives the final signature
 	if len(signatures[sigReceiver]) == 0 {
+		to := sigReceiver
+		_ = to
 		t.Fatalf("Party %d (sig_receiver) should receive signature but got empty", sigReceiver)
 	}
 	for i := 0; i < nParties; i++ {
@@ -712,6 +714,8 @@ func TestECDSAMPSignRefreshSign(t *testing.T) {
 	}
 
 	if len(signatures[sigReceiver]) == 0 {
+		to := sigReceiver
+		_ = to
 		t.Fatalf("Party %d should receive signature", sigReceiver)
 	}
 	t.Logf("Sign before refresh successful, signature: %s", abbrevHex(signatures[sigReceiver]))
@@ -817,6 +821,8 @@ func TestECDSAMPSignRefreshSign(t *testing.T) {
 	}
 
 	if len(signatures[sigReceiver]) == 0 {
+		to := sigReceiver
+		_ = to
 		t.Fatalf("Party %d should receive signature after refresh", sigReceiver)
 	}
 	t.Logf("Sign after refresh successful, signature: %s", abbrevHex(signatures[sigReceiver]))

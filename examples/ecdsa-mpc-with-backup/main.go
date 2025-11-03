@@ -1,3 +1,5 @@
+//go:build cgo && !windows
+
 package main
 
 import (
@@ -11,12 +13,12 @@ import (
 	"time"
 
 	"github.com/coinbase/cb-mpc-go/examples/internal/config"
-	"github.com/coinbase/cb-mpc-go/examples/tlsnet"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/curve"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/ecdsamp"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/kem/rsa"
 	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/pve"
+	"github.com/coinbase/cb-mpc-go/pkg/cbmpc/transport/mtls"
 )
 
 func main() {
@@ -71,14 +73,16 @@ func main() {
 		log.Fatalf("load CA: %v", err)
 	}
 
-	// Setup mTLS transport
-	transport, err := tlsnet.New(tlsnet.Config{
-		Self:        selfIndex,
-		Names:       names,
-		Addresses:   addresses,
-		Certificate: cert,
-		RootCAs:     caPool,
-	})
+    // Setup mTLS transport
+    parties := make([]mtls.Party, len(names))
+    for i := range names {
+        parties[i] = mtls.Party{Name: names[i], Address: addresses[i]}
+    }
+    transport, err := mtls.New(mtls.Config{
+        SelfIndex: selfIndex,
+        Parties:   parties,
+        TLS:       mtls.TLSConfig{Certificate: cert, RootCAs: caPool},
+    })
 	if err != nil {
 		log.Fatalf("start tls transport: %v", err)
 	}
@@ -280,14 +284,6 @@ func main() {
 	log.Printf("[%s] - Verified and recovered key from backup", names[selfIndex])
 	log.Printf("[%s] - Refreshed key shares (proactive security)", names[selfIndex])
 	log.Printf("[%s]", names[selfIndex])
-	log.Printf("[%s] This demonstrates production-grade:", names[selfIndex])
-	log.Printf("[%s] ✓ Secure multi-party computation with mTLS", names[selfIndex])
-	log.Printf("[%s] ✓ Threshold cryptography (2-of-3)", names[selfIndex])
-	log.Printf("[%s] ✓ Distributed key generation without trust", names[selfIndex])
-	log.Printf("[%s] ✓ Collaborative threshold signing", names[selfIndex])
-	log.Printf("[%s] ✓ Publicly verifiable encryption for backups", names[selfIndex])
-	log.Printf("[%s] ✓ Secure key recovery", names[selfIndex])
-	log.Printf("[%s] ✓ Proactive security via key refresh", names[selfIndex])
 
 	// Write backup to file (optional)
 	if os.Getenv("SAVE_BACKUP") == "1" {

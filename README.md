@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/coinbase/cb-mpc-go.svg)](https://pkg.go.dev/github.com/coinbase/cb-mpc-go)
 
-A production-focused Go wrapper around [Coinbase's cb-mpc](https://github.com/coinbase/cb-mpc) multi-party computation (MPC) library. The goal of this repository is to surface a safe, ergonomic, and well-structured Go API while building directly from the C++ source tree. All tooling runs natively by default, and you can opt into a reproducible Docker environment by exporting `CBMPC_USE_DOCKER=1` (the same mode used by CI).
+A Go wrapper around [Coinbase's cb-mpc](https://github.com/coinbase/cb-mpc) multi-party computation (MPC) library. The goal of this repository is to surface a safe, ergonomic, and well-structured Go API while building directly from the C++ source tree. All tooling runs natively by default, and you can opt into a reproducible Docker environment by exporting `CBMPC_USE_DOCKER=1` (the same mode used by CI).
 
 ## Repository layout
 
@@ -52,7 +52,7 @@ A production-focused Go wrapper around [Coinbase's cb-mpc](https://github.com/co
    make test
    ```
 
-   On a clean macOS install the helper script automatically downloads Go 1.25.2 into `build/go-host`. Set `CBMPC_USE_DOCKER=1` if you prefer to run the tests inside the dev container, which will keep its own toolchain under `build/go-docker`.
+   On a clean macOS install the helper script automatically downloads Go 1.25.3 into `build/go-host`. Set `CBMPC_USE_DOCKER=1` if you prefer to run the tests inside the dev container, which will keep its own toolchain under `build/go-docker`.
 
 5. Run Go linters:
 
@@ -92,14 +92,7 @@ This displays:
 - **Upstream SHA**: The current commit hash of the `cb-mpc` submodule
 - **Upstream Dir**: The submodule directory name (typically `cb-mpc`)
 
-Both values are embedded into the compiled binary at build time via `-ldflags` and can be accessed programmatically:
-
-```go
-import "github.com/coinbase/cb-mpc-go/pkg/cbmpc"
-
-fmt.Println("Wrapper:", cbmpc.WrapperVersion())  // e.g., "v0.1.0" or "68dd572-dirty"
-fmt.Println("Upstream:", cbmpc.UpstreamVersion()) // e.g., "3aced93df47..."
-```
+Both values are embedded into the compiled binary at build time via `-ldflags` and can be accessed programmatically. See `pkg/cbmpc/example_test.go` for working examples of version functions usage.
 
 ### Embedding version info in your builds
 
@@ -169,11 +162,38 @@ When users import specific versions via `go get github.com/coinbase/cb-mpc-go@v0
 
 - Hosted API docs are available on pkg.go.dev: https://pkg.go.dev/github.com/coinbase/cb-mpc-go
 
+## Transports
+
+The core library is transport-agnostic via the `cbmpc.Transport` interface. For production, we recommend the mTLS transport:x
+
+- `pkg/cbmpc/transport/mtls`: TLS 1.3, mutual authentication, SAN-bound identity, size limits, deadlines, reconnect with backoff.
+
+For testing or in-process simulations:
+
+- `pkg/cbmpc/transport/mocknet`: in-memory transport suitable for unit tests.
+
+Development certificates can be generated with `examples/certutil/cmd/gen-certs` (not for production use).
+
+## Examples
+
+### Examples with using mTLS tranpport
+
+- **2-Party Agree Random**: Commit-reveal protocol for shared randomness over mTLS - `examples/agree-random-2p/README.md`
+- **Multi-Party Agree Random**: Multi-party shared randomness over mTLS - `examples/agree-random-mp/README.md`
+- **Threshold ECDSA MPC with PVE Backup**: Complete threshold signing workflow with encrypted backup - `examples/ecdsa-mpc-with-backup/README.md`
+
+### Cryptographic primitives
+
+- **PVE**: Publicly Verifiable Encryption with proof verification - `examples/pve/` (see also `pkg/cbmpc/pve/example_test.go`)
+- **KEM**: Deterministic RSA-OAEP KEM - `pkg/cbmpc/kem/rsa/example_test.go`
+- **KEM PVE Round-Trip**: RSA-OAEP KEM encryption and decryption cycle - `examples/kem-pve-roundtrip/`
+- **KEM Determinism**: Demonstrates deterministic RSA-OAEP KEM for PVE - `examples/kem-determinism/`
+- **Zero-Knowledge Proof (UC-DL)**: Non-interactive DLog proof generation and verification - `examples/zk-uc-dl/` (see also `pkg/cbmpc/zk/example_test.go`)
+
+### Utilities
+
+- **Certificate Generator**: Development mTLS certificates (not for production) - `examples/certutil/cmd/gen-certs/`
+
 ## Continuous integration
 
 GitHub Actions workflows invoke the same Make targets (`make lint`, `make vuln`, `make sec`, `make test`) on every pull request with `CBMPC_USE_DOCKER=1`, covering a Linux container matrix across amd64 and arm64 plus a native macOS host job so both environments stay healthy.
-
-## Next steps
-
-- Model higher-level Go APIs that expose safe MPC workflows
-- Expand testing (unit and integration) around the bindings once available
