@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: '0 5 * * 0'
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: CodeQL Analysis
@@ -16,8 +19,13 @@ jobs:
       contents: read
       security-events: write
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
 
@@ -29,7 +37,7 @@ jobs:
         run: echo "rev=$(git rev-parse HEAD:cb-mpc)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Go cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/.cache
           key: codeql-go-cache-${{ hashFiles('go.sum') }}-${{ steps.cbmpc.outputs.rev }}
@@ -37,7 +45,7 @@ jobs:
             codeql-go-cache-
 
       - name: Restore cb-mpc build cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             build/openssl-host
@@ -52,7 +60,7 @@ jobs:
           sudo apt-get install -y build-essential cmake clang ninja-build pkg-config python3 perl git curl
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
         with:
           languages: go, cpp
 
@@ -64,4 +72,4 @@ jobs:
           make test
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
