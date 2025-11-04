@@ -3,7 +3,6 @@ package mtls
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +50,10 @@ func New(cfg Config) (*Transport, error) {
 	if cfg.TLS.RootCAs == nil {
 		return nil, errors.New("mtls: root CA pool required")
 	}
+	// Ensure a non-empty certificate with a private key is provided
+	if len(cfg.TLS.Certificate.Certificate) == 0 || cfg.TLS.Certificate.PrivateKey == nil {
+		return nil, errors.New("mtls: certificate (with private key) required")
+	}
 	if cfg.SelfIndex < 0 || cfg.SelfIndex >= len(cfg.Parties) {
 		return nil, fmt.Errorf("mtls: invalid self index %d", cfg.SelfIndex)
 	}
@@ -61,6 +64,26 @@ func New(cfg Config) (*Transport, error) {
 		return nil, fmt.Errorf("mtls: too many parties (%d) for 32-bit role IDs", len(cfg.Parties))
 	}
 	cfg.defaults()
+
+	// Validate parties: non-empty unique names and unique addresses
+	nameSeen := make(map[string]struct{}, len(cfg.Parties))
+	addrSeen := make(map[string]struct{}, len(cfg.Parties))
+	for i, p := range cfg.Parties {
+		if p.Name == "" {
+			return nil, fmt.Errorf("mtls: party %d has empty Name", i)
+		}
+		if p.Address == "" {
+			return nil, fmt.Errorf("mtls: party %d has empty Address", i)
+		}
+		if _, ok := nameSeen[p.Name]; ok {
+			return nil, fmt.Errorf("mtls: duplicate party Name %q", p.Name)
+		}
+		nameSeen[p.Name] = struct{}{}
+		if _, ok := addrSeen[p.Address]; ok {
+			return nil, fmt.Errorf("mtls: duplicate party Address %q", p.Address)
+		}
+		addrSeen[p.Address] = struct{}{}
+	}
 
 	names := make([]string, len(cfg.Parties))
 	addrs := make([]string, len(cfg.Parties))
@@ -152,27 +175,45 @@ func New(cfg Config) (*Transport, error) {
 			if cfg.Timeouts.Handshake > 0 {
 				_ = tlsConn.SetDeadline(time.Time{})
 			}
-			peerID, err := readPeerID(tlsConn)
-			if err != nil {
-				errCh <- closeWithContextErr(tlsConn, fmt.Errorf("mtls: read peer id: %w", err))
-				return
-			}
-			if uint64(peerID) >= uint64(len(names)) {
-				errCh <- closeWithContextErr(tlsConn, fmt.Errorf("mtls: unexpected peer id %d", peerID))
-				return
-			}
 			state := tlsConn.ConnectionState()
 			if len(state.PeerCertificates) == 0 {
 				errCh <- closeWithContextErr(tlsConn, errors.New("mtls: missing peer certificate"))
 				return
 			}
 			leaf := state.PeerCertificates[0]
-			expectedName := names[peerID]
+			// Derive peer index from certificate SAN names (no framing needed)
+			var (
+				peerIdx      = -1
+				matchedCount = 0
+			)
+			for i, p := range cfg.Parties {
+				if i == cfg.SelfIndex {
+					continue
+				}
+				if certHasSANName(leaf, p.Name) {
+					peerIdx = i
+					matchedCount++
+				}
+			}
+			if matchedCount == 0 || peerIdx < 0 {
+				errCh <- closeWithContextErr(tlsConn, fmt.Errorf("mtls: unrecognized peer certificate (no SAN name matches configured parties)"))
+				return
+			}
+			if matchedCount > 1 {
+				errCh <- closeWithContextErr(tlsConn, fmt.Errorf("mtls: ambiguous peer certificate (matches multiple configured parties)"))
+				return
+			}
+			expectedName := names[peerIdx]
 			if err := verifyPeerIdentity(leaf, expectedName, cfg.TLS.SPKIPin, cfg.TLS.VerifyPeer); err != nil {
 				errCh <- closeWithContextErr(tlsConn, err)
 				return
 			}
-			if err := register(cbmpc.RoleID(peerID), tlsConn); err != nil {
+			roleID, err := roleIDFromIndex(peerIdx)
+			if err != nil {
+				errCh <- closeWithContextErr(tlsConn, err)
+				return
+			}
+			if err := register(roleID, tlsConn); err != nil {
 				errCh <- closeWithContextErr(tlsConn, err)
 				return
 			}
@@ -235,12 +276,6 @@ func New(cfg Config) (*Transport, error) {
 				}
 				if cfg.Timeouts.Handshake > 0 {
 					_ = conn.SetDeadline(time.Time{})
-				}
-				if err := writePeerID(conn, uint32(selfRole)); err != nil {
-					_ = conn.Close()
-					backoff = nextBackoff(backoff, cfg)
-					time.Sleep(backoff)
-					continue
 				}
 				roleID, err := roleIDFromIndex(peerIdx)
 				if err != nil {
@@ -351,16 +386,59 @@ func (t *Transport) ReceiveAll(ctx context.Context, from []cbmpc.RoleID) (map[cb
 		uniq[role] = struct{}{}
 	}
 
+	// Receive from all peers concurrently to avoid head-of-line blocking
 	out := make(map[cbmpc.RoleID][]byte, len(from))
+	var mu sync.Mutex
+
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+
 	for _, role := range from {
 		pc, _ := t.getPeer(role)
-		msg, err := pc.recvOne(ctx, t.ctx)
-		if err != nil {
-			return nil, err
-		}
-		out[role] = msg
+		wg.Add(1)
+		go func(r cbmpc.RoleID, pc *peerConn) {
+			defer wg.Done()
+			msg, err := pc.recvOne(childCtx, t.ctx)
+			if err != nil {
+				select {
+				case errCh <- fmt.Errorf("mtls: receive from %d: %w", r, err):
+					cancel()
+				default:
+				}
+				return
+			}
+			mu.Lock()
+			out[r] = msg
+			mu.Unlock()
+		}(role, pc)
 	}
-	return out, nil
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return out, nil
+	case err := <-errCh:
+		<-done
+		return nil, err
+	case <-childCtx.Done():
+		<-done
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, errors.New("mtls: receive_all cancelled")
+	case <-t.ctx.Done():
+		cancel()
+		<-done
+		return nil, errors.New("mtls: transport closed")
+	}
 }
 
 // Close terminates the transport and underlying connections.
@@ -480,21 +558,6 @@ func (pc *peerConn) errOr(fallback error) error {
 		return pc.err
 	}
 	return fallback
-}
-
-func writePeerID(conn net.Conn, id uint32) error {
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], id)
-	_, err := conn.Write(buf[:])
-	return err
-}
-
-func readPeerID(conn net.Conn) (uint32, error) {
-	var buf [4]byte
-	if _, err := io.ReadFull(conn, buf[:]); err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint32(buf[:]), nil
 }
 
 func roleIDFromIndex(idx int) (cbmpc.RoleID, error) {

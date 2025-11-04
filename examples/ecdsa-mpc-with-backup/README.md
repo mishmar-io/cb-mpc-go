@@ -175,15 +175,7 @@ This creates `backup-alice.hex` and `backup-bob.hex` files containing the PVE-en
 
 ### Network Layer
 
-The example uses the `pkg/cbmpc/transport/mtls` transport for mTLS-based communication:
-
-```go
-transport, err := mtls.New(mtls.Config{
-    SelfIndex: selfIndex,
-    Parties:   parties, // names+addresses mapped to mtls.Party
-    TLS:       mtls.TLSConfig{Certificate: cert, RootCAs: caPool},
-})
-```
+The example uses the `pkg/cbmpc/transport/mtls` transport for mTLS-based communication. See `pkg/cbmpc/transport/mtls/example_test.go` for usage examples.
 
 Features:
 - Long-lived TLS 1.3 connections
