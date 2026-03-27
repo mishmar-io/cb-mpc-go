@@ -1,199 +1,131 @@
 # cb-mpc-go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/coinbase/cb-mpc-go.svg)](https://pkg.go.dev/github.com/coinbase/cb-mpc-go)
+Go bindings for Coinbase MPC, implemented strictly on top of the public C API (`include/cbmpc/c_api/*`).
 
-A Go wrapper around [Coinbase's cb-mpc](https://github.com/coinbase/cb-mpc) multi-party computation (MPC) library. The goal of this repository is to surface a safe, ergonomic, and well-structured Go API while building directly from the C++ source tree. All tooling runs natively by default, and you can opt into a reproducible Docker environment by exporting `CBMPC_USE_DOCKER=1` (the same mode used by CI).
+## Status
 
-## Repository layout
+`cb-mpc-go` is beta software. Its primary goal is to make the public `cb-mpc` C API easier to use from Go while the wrapper surface continues to mature.
 
-- `cb-mpc`: git submodule tracking the upstream C++ library.
-- `pkg/cbmpc`: public Go API surface with MPC protocol implementations.
-- `pkg/cbmpc/internal/backend`: CGO bridge to the C++ cb-mpc library.
-- `examples/`: example programs demonstrating MPC protocols (agree-random-2p, agree-random-mp, etc.).
-- `Dockerfile`: development container image that matches the CI environment.
-- `.github/workflows/`: GitHub Actions pipelines for linting and testing pull requests.
+Project policies:
 
-## Getting started
+- [License](LICENSE)
+- [Security Policy](SECURITY.md)
+- [Bug Bounty Scope](BUG_BOUNTY.md)
+- [Security Testing Notes](pkg/mpc/SECURITY_TESTING.md)
+- [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 
-1. Install prerequisites:
+## Scope
 
-   ```bash
-   brew install git-lfs            # or use your distro package manager
-   git lfs install
-   ```
+- Uses only the **public install** of `cb-mpc` (`include/` + `lib/`)
+- Does **not** depend on `include-internal/` or any internal C++ headers
+- Wraps the public C API surface in `pkg/mpc`
 
-   The upstream cb-mpc submodule stores several assets in Git LFS; without these commands `git submodule update` will emit warnings and leave large binaries out of sync.
+## Supported Protocols
 
-2. Clone the repository and initialize submodules:
+- ECDSA 2PC: DKG, refresh, sign, key/public-share helpers
+- ECDSA MP: additive + access-structure variants
+- EdDSA 2PC/MP: additive + access-structure variants
+- Schnorr 2PC/MP: additive + access-structure variants, x-only pubkey extract
+- TDH2: DKG, encrypt/verify, partial decrypt, combine (additive + AC)
+- PVE / PVE Batch / PVE AC: encrypt/verify/decrypt + optional callback bridges (base PKE / KEM / HSM)
 
-   ```bash
-   git clone git@github.com:coinbase/cb-mpc-go.git
-   cd cb-mpc-go
-   git submodule update --init --recursive
-   ```
+## Requirements
 
-  The `cb-mpc` submodule is pinned to a specific commit SHA. When contributing, keep it at the recorded revision unless you are preparing an intentional bump (see `docs/adr/0005-submodule-pin-policy.md`).
+- Go 1.24+
+- CMake + C++17 toolchain
+- `cb-mpc` submodule checked out at upstream tag `v0.2.0` (this repo vendors it as a submodule)
+- OpenSSL/toolchain setup required by the pinned `cb-mpc` revision (see `cb-mpc/README.md`; `v0.2.0` uses the OpenSSL 3.6.1 flow)
 
-   Alternatively run `scripts/bootstrap.sh` to automate LFS setup, submodule sync, tool downloads, and the initial builds.
-
-3. Build the cb-mpc C++ static library from source without installing it system-wide:
-
-   ```bash
-   make build-cbmpc
-   ```
-
-   The examples below run natively. If you prefer the Linux dev container, prefix commands with `CBMPC_USE_DOCKER=1` (Docker must be available and running).
-
-   Native builds write artefacts under `build/openssl-host` and `build/cb-mpc-host`. When running with `CBMPC_USE_DOCKER=1`, the helper scripts isolate the container builds under `build/openssl-docker` and `build/cb-mpc-docker` to avoid CMake cache conflicts.
-
-4. Run the (currently minimal) Go test suite (the target depends on `make build-cbmpc` to ensure the native library is present):
-
-   ```bash
-   make test
-   ```
-
-   On a clean macOS install the helper script automatically downloads Go 1.25.3 into `build/go-host`. Set `CBMPC_USE_DOCKER=1` if you prefer to run the tests inside the dev container, which will keep its own toolchain under `build/go-docker`.
-
-5. Run Go linters:
-
-   ```bash
-   make lint
-   ```
-
-   A matching `golangci-lint` v2.5.0 binary is installed into `build/bin-host` (or `build/bin-docker` in container mode) on demand.
-
-## Development workflow
-
-- `make bootstrap` runs Git LFS setup, syncs submodules, and performs the initial cb-mpc build.
-- `make lint-fix` formats and auto-fixes lint findings when supported by `golangci-lint`.
-- `make vuln` executes `govulncheck ./...` with the pinned toolchain, while `make sec` runs `gosec` security analysis on the codebase. Run `make tools` once to install the pinned security tools into `build/tools/bin`.
-- `make tidy-check` ensures `go.mod` and `go.sum` stay clean by running `go mod tidy` and failing on diffs.
-- `make clean` removes all generated build artefacts, including the local cb-mpc build directory.
-- Tool shims bootstrap pinned Go and `golangci-lint` toolchains automatically and keep separate caches per environment flavour (`*-host` vs `*-docker`) so you can switch between native macOS and Linux container runs without manual cleanup. Export `CBMPC_USE_DOCKER=1` to run the same workflow inside the dev container.
-- The `Dockerfile` mirrors the tooling used in CI, allowing local validation via `docker build .`.
-
-## Versioning
-
-This project tracks two versions:
-
-1. **Wrapper Version**: The version of this Go wrapper library
-2. **Upstream SHA**: The pinned commit of the cb-mpc C++ library (submodule)
-
-### Checking versions
-
-View current version information:
+## Build and Test
 
 ```bash
-make version
+# Initialize the pinned cb-mpc v0.2.0 submodule
+make deps
+
+# Build cb-mpc + public install, then Go code
+make build
+
+# Run tests
+make test
+
+# Run protocol examples
+make examples
 ```
 
-This displays:
-- **Wrapper Version**: Derived from git tags using `git describe --tags --always --dirty`
-- **Upstream SHA**: The current commit hash of the `cb-mpc` submodule
-- **Upstream Dir**: The submodule directory name (typically `cb-mpc`)
+The runnable interactive examples use `mpctest.NewMockNetwork` for local demos
+and tests. That transport is not authenticated or confidential. Production
+deployments should provide their own `Session`, for example by starting from an
+mTLS-backed implementation similar to `examples/mtls_session.go` and hardening
+it for their own trust model and PKI.
 
-Both values are embedded into the compiled binary at build time via `-ldflags` and can be accessed programmatically. See `pkg/cbmpc/example_test.go` for working examples of version functions usage.
+This repository intentionally pins the underlying `cb-mpc` submodule to the
+tested upstream `v0.2.0` release instead of following a floating branch.
 
-### Embedding version info in your builds
+All Go commands should run through `scripts/go_with_cpp.sh` (the Makefile already does this) so `CGO_CFLAGS` and `CGO_LDFLAGS` point at:
 
-- **Make/test targets**: `make test` already passes the correct `-ldflags` so the values above are embedded.
-- **Examples**: `scripts/run_example.sh` now injects `-ldflags "$(make -s print-ldflags)"` automatically. To override, pass your own `-ldflags`.
-- **Manual builds/runs**: If you run `go` directly, pass the flags yourself:
+- `cb-mpc/build/install/public/include`
+- `cb-mpc/build/install/public/lib`
 
-  ```bash
-  # Build
-  go build -ldflags "$(make -s print-ldflags)" ./...
+## Quick Example (ECDSA-2PC)
 
-  # Run
-  go run -ldflags "$(make -s print-ldflags)" ./examples/agree-random-2p
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
 
-  # Or via our shim (adds pinned toolchain and CGO env)
-  scripts/run_with_go.sh build -ldflags "$(make -s print-ldflags)" ./...
-  ```
+// mpctest.NewMockNetwork is for local demos/tests only.
+sessions := mpctest.NewMockNetwork(2)
+defer sessions[0].Close()
+defer sessions[1].Close()
 
-- **Ensure tags are available**: The wrapper version comes from `git describe`. If you cloned without tags, run:
+var (
+	keyBlobs [2][]byte
+	wg       sync.WaitGroup
+	errCh    = make(chan error, 2)
+)
 
-  ```bash
-  git fetch --tags --force
-  ```
+for i := 0; i < 2; i++ {
+	wg.Add(1)
+	go func(idx int) {
+		defer wg.Done()
+		blob, err := mpc.ECDSA2PDKG(ctx, sessions[idx], mpc.CurveSecp256k1)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		keyBlobs[idx] = blob
+	}(i)
+}
+wg.Wait()
+close(errCh)
 
-  Then `make version` should reflect the expected tag.
+for err := range errCh {
+	if err != nil {
+		log.Fatalf("ecdsa 2pc dkg failed: %v", err)
+	}
+}
+```
 
-### Releasing a new version (for maintainers)
+See full runnable examples in:
 
-To release a new version of the Go wrapper:
+- `examples/ecdsa2pc`
+- `examples/schnorr2pc`
+- `examples/eddsa2pc`
+- `examples/tdh2`
+- `examples/pve_batch`
 
-1. **Update the submodule** (if needed) to pin a specific cb-mpc version:
-   ```bash
-   git submodule update --remote cb-mpc
-   git add cb-mpc
-   git commit -m "chore: update cb-mpc submodule to <commit-sha>"
-   ```
+## Architecture
 
-2. **Create and push a semantic version tag**:
-   ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
+```text
+pkg/mpc (public Go API)
+  -> internal/cgo (only package importing "C")
+    -> cb-mpc public C API (cbmpc/c_api/*) + libcbmpc
+```
 
-   The tag should follow [Semantic Versioning](https://semver.org/):
-   - `v0.x.y` for initial development (pre-1.0)
-   - `vX.Y.Z` for stable releases where:
-     - `X` = breaking changes
-     - `Y` = new features (backward compatible)
-     - `Z` = bug fixes
+## Notes
 
-3. **Verify the version**:
-   ```bash
-   make version
-   # Should show: Wrapper Version: v0.1.0
-   ```
-
-When users import specific versions via `go get github.com/coinbase/cb-mpc-go@v0.1.0`, Go will fetch both the tagged wrapper code and the pinned cb-mpc submodule commit automatically.
-
-## Documentation
-
-- View docs locally with:
-
-  ```bash
-  make doc
-  # then open http://localhost:6060/github.com/coinbase/cb-mpc-go
-  ```
-
-- Hosted API docs are available on pkg.go.dev: https://pkg.go.dev/github.com/coinbase/cb-mpc-go
-
-## Transports
-
-The core library is transport-agnostic via the `cbmpc.Transport` interface. For production, we recommend the mTLS transport:x
-
-- `pkg/cbmpc/transport/mtls`: TLS 1.3, mutual authentication, SAN-bound identity, size limits, deadlines, reconnect with backoff.
-
-For testing or in-process simulations:
-
-- `pkg/cbmpc/transport/mocknet`: in-memory transport suitable for unit tests.
-
-Development certificates can be generated with `examples/certutil/cmd/gen-certs` (not for production use).
-
-## Examples
-
-### Examples with using mTLS tranpport
-
-- **2-Party Agree Random**: Commit-reveal protocol for shared randomness over mTLS - `examples/agree-random-2p/README.md`
-- **Multi-Party Agree Random**: Multi-party shared randomness over mTLS - `examples/agree-random-mp/README.md`
-- **Threshold ECDSA MPC with PVE Backup**: Complete threshold signing workflow with encrypted backup - `examples/ecdsa-mpc-with-backup/README.md`
-
-### Cryptographic primitives
-
-- **PVE**: Publicly Verifiable Encryption with proof verification - `examples/pve/` (see also `pkg/cbmpc/pve/example_test.go`)
-- **KEM**: Deterministic RSA-OAEP KEM - `pkg/cbmpc/kem/rsa/example_test.go`
-- **KEM PVE Round-Trip**: RSA-OAEP KEM encryption and decryption cycle - `examples/kem-pve-roundtrip/`
-- **KEM Determinism**: Demonstrates deterministic RSA-OAEP KEM for PVE - `examples/kem-determinism/`
-- **Zero-Knowledge Proof (UC-DL)**: Non-interactive DLog proof generation and verification - `examples/zk-uc-dl/` (see also `pkg/cbmpc/zk/example_test.go`)
-
-### Utilities
-
-- **Certificate Generator**: Development mTLS certificates (not for production) - `examples/certutil/cmd/gen-certs/`
-
-## Continuous integration
-
-GitHub Actions workflows invoke the same Make targets (`make lint`, `make vuln`, `make sec`, `make test`) on every pull request with `CBMPC_USE_DOCKER=1`, covering a Linux container matrix across amd64 and arm64 plus a native macOS host job so both environments stay healthy.
+- The underlying `cb-mpc` implementation is not thread-safe; do not share mutable protocol state across goroutines without synchronization.
+- Interactive protocols require all parties to run concurrently and exchange messages through a `Session`.
+- `mpctest.NewMockNetwork` and the example transports are for demos and tests; production code should use a hardened authenticated/confidential transport with appropriate peer-identity binding and deadlines/timeouts.
+- Many returned blobs (key blobs, private shares, decryption keys) contain sensitive material. They are returned as Go `[]byte` and may remain in memory until garbage collected; zeroize buffers when you are done with them if you need stricter in-memory handling (see `mpc.Zeroize` / `mpc.ZeroizeSlices` or `mpc.Sensitive` / `mpc.SensitiveSlices`).
+- Production `Session` implementations should provide authenticated + confidential transport and enforce reasonable message size limits to avoid memory-exhaustion attacks from untrusted peers.

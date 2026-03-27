@@ -3,7 +3,7 @@ name: CodeQL
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [ master ]
   schedule:
     - cron: '0 5 * * 0'
 
@@ -19,7 +19,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - name: Harden the runner (Audit all outbound calls)
+      - name: Audit outbound calls (does not block egress)
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
         with:
           egress-policy: audit
@@ -32,32 +32,51 @@ jobs:
       - name: Ensure LFS assets are present
         run: git lfs pull --exclude='' --include='*'
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Go modules
+        run: go mod verify
+
       - name: Record cb-mpc revision
         id: cbmpc
         run: echo "rev=$(git rev-parse HEAD:cb-mpc)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Go cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/.cache
-          key: codeql-go-cache-${{ hashFiles('go.sum') }}-${{ steps.cbmpc.outputs.rev }}
-          restore-keys: |
-            codeql-go-cache-
 
       - name: Restore cb-mpc build cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
-            build/openssl-host
-            build/cb-mpc-host
-          key: codeql-build-${{ steps.cbmpc.outputs.rev }}
+            cb-mpc/build
+            cb-mpc/lib
+          key: codeql-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.cbmpc.outputs.rev }}
           restore-keys: |
-            codeql-build-
+            codeql-build-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake clang ninja-build pkg-config python3 perl git curl
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            curl \
+            perl \
+            pkg-config \
+            rsync
+
+      - name: Ensure sha256sum is available
+        run: command -v sha256sum
+
+      - name: Build custom OpenSSL (Linux)
+        run: |
+          sudo bash scripts/openssl/build-static-openssl-linux.sh
+          sudo mkdir -p /usr/local/lib64 /usr/local/lib /usr/local/include
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/lib64/libcrypto.a /usr/local/lib64/libcrypto.a
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/lib64/libcrypto.a /usr/local/lib/libcrypto.a
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/include/openssl /usr/local/include/openssl
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
@@ -65,11 +84,7 @@ jobs:
           languages: go, cpp
 
       - name: Build project
-        env:
-          CBMPC_USE_DOCKER: "0"
-        run: |
-          make bootstrap
-          make test
+        run: make build
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9

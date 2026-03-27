@@ -16,7 +16,7 @@ We are committed to providing a welcoming and harassment-free experience for eve
 
 ## Reporting
 
-If you observe or experience unacceptable behavior, contact the maintainers at cb-mpc@coinbase.com. Reports will be handled confidentially and the maintainers will outline next steps in a timely manner.
+If you observe or experience unacceptable behavior, contact the maintainers at `cb-mpc@coinbase.com`. Reports will be handled confidentially and the maintainers will outline next steps in a timely manner.
 
 ## Enforcement
 
@@ -24,7 +24,7 @@ Project maintainers may take any action they deem appropriate, including warning
 
 ## Scope
 
-This policy applies to project spaces (issue trackers, pull requests, discussions, chat) and any public spaces where an individual represents the project.
+This policy applies to project spaces, including issue trackers, pull requests, discussions, chat, and any public spaces where an individual represents the project.
 
 ## Attribution
 

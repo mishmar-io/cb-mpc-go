@@ -1,11 +1,26 @@
 # Security Policy
 
+`cb-mpc-go` is beta software. It mainly exists to demonstrate and expose the public `cb-mpc` C API through an idiomatic Go package so that MPC protocols can be used more easily from Go.
+
 ## Reporting a Vulnerability
 
-Please email cb-mpc@coinbase.com with a description of the potential issue, the affected versions or commits, and any relevant reproduction steps or proof-of-concept material. Our security team monitors this alias and will coordinate a fix or follow-up questions as needed.
+If you believe you have found a security issue in this repository, please email `cb-mpc@coinbase.com` with:
 
-We do **not** track security reports or pay bounties through GitHub issues or pull requests. Opening an issue for a suspected vulnerability will be closed without bounty eligibility.
+- a description of the issue
+- affected versions or commits
+- reproduction steps or proof-of-concept material, if available
+- whether the issue is in the Go API, CGO bridge, examples, or build/test tooling
+
+Please do not report suspected vulnerabilities through public GitHub issues or pull requests.
+
+## Bug Bounty Eligibility
+
+Reports that are specific to `cb-mpc-go` are welcome, but they are not eligible for a bounty through Coinbase's HackerOne program. See `BUG_BOUNTY.md` for scope details.
+
+## Upstream `cb-mpc` Issues
+
+If the issue affects the underlying `cb-mpc` library rather than this Go wrapper, please follow `cb-mpc/SECURITY.md` for disclosure guidance. Any HackerOne eligibility is determined by the upstream `cb-mpc` policy and scope, including `cb-mpc/BUG_BOUNTY.md`.
 
 ## Responsible Disclosure
 
-We kindly ask that you give us a reasonable amount of time to investigate and remediate before any public disclosure. We will keep you updated on the status of your report and credit you in release notes whenever appropriate.
+Please avoid public disclosure until the issue has been reviewed and, where appropriate, remediated.
