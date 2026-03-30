@@ -13,19 +13,38 @@ the upstream `cb-mpc` implementation.
 
 Integration-style happy-path coverage for the shipped wrapper APIs:
 
+The current package test suite directly exercises the exported `pkg/mpc`
+surface for this pinned release, including protocol flows, helper constructors,
+memory/sensitivity helpers, and callback bridges.
+
 - ECDSA 2PC and MP additive flows
+- ECDSA MP access-structure DKG / sign / refresh flows
 - EdDSA 2PC and MP additive flows
+- EdDSA MP access-structure DKG / sign / refresh flows
 - Schnorr 2PC and MP additive flows
-- TDH2 DKG, encrypt, verify, partial decrypt, and combine
+- Schnorr MP access-structure DKG / sign / refresh flows
+- TDH2 additive and access-structure DKG / encrypt / verify / partial decrypt / combine flows
 - PVE single-recipient, batch, and access-structure flows
+- Advanced PVE helper paths:
+  - built-in ECIES-P256 software key generation
+  - RSA modulus and ECIES public-key helper constructors for HSM-backed keys
+  - RSA / ECIES HSM callback decrypt paths for single, batch, and AC flows
+  - custom KEM callback encrypt / verify / decrypt flow
+- Key-blob helper round-trips:
+  - ECDSA / EdDSA / Schnorr detach-private-scalar + attach-private-scalar
+    round-trips for 2PC and MP additive key blobs
 
 Security-relevant assertions in these tests include:
 
 - all parties derive the same public key material for a shared protocol run
 - designated signature receivers are the only parties that receive MP outputs
+- refreshed AC key blobs preserve the original public key
 - Ed25519 signatures verify against the derived public key
 - ECDSA signatures are well-formed DER with positive `r`/`s` values
+- Schnorr signatures have the expected x-only public key and output width
 - TDH2 and PVE encrypt/verify/decrypt paths round-trip the expected plaintext
+- detached/reattached key blobs preserve public keys, public shares, and
+  signing usability
 
 ### `pkg/mpc/malicious_session_test.go`
 
@@ -78,7 +97,7 @@ The current automated coverage does not claim:
 - proof of constant-time behavior or side-channel resistance
 - authenticated or confidential transport from `mpctest.NewMockNetwork`
 - general Byzantine fault tolerance, collusion resistance, or replay resistance
-- production readiness of example code or dev certificate scripts
+- production readiness of example/demo code or dev certificate scripts
 
 ## Production Assumptions
 
@@ -90,6 +109,6 @@ implementation with:
 - reasonable message-size limits
 - timeout/cancellation handling for stalled or malicious peers
 
-`mpctest.NewMockNetwork`, `mpctest.MaliciousSession`, and the example
+`mpctest.NewMockNetwork`, `mpctest.MaliciousSession`, and the example/demo
 transports exist to test or demonstrate integration behavior. They are not
 drop-in production transports.

@@ -16,6 +16,8 @@ import (
 //   - It is still safe and useful to call Close() multiple times.
 type SensitiveBytes []byte
 
+// Sensitive wraps b as SensitiveBytes without copying it.
+// Call Close when you are done to zeroize the backing slice.
 func Sensitive(b []byte) SensitiveBytes { return SensitiveBytes(b) }
 
 func (s SensitiveBytes) Bytes() []byte { return []byte(s) }
@@ -33,6 +35,8 @@ func (s SensitiveBytes) Format(state fmt.State, verb rune) {
 // See SensitiveBytes for caveats.
 type SensitiveByteSlices [][]byte
 
+// SensitiveSlices wraps bs as SensitiveByteSlices without copying it.
+// Call Close when you are done to zeroize each backing slice.
 func SensitiveSlices(bs [][]byte) SensitiveByteSlices { return SensitiveByteSlices(bs) }
 
 func (s SensitiveByteSlices) Bytes() [][]byte { return [][]byte(s) }

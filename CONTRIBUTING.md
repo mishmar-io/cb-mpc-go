@@ -26,9 +26,13 @@ Please keep pull requests aligned with the repository's design constraints:
 Use the repository scripts and Makefile so CGO points at the public install prefix:
 
 ```bash
+make deps
 make build
 make test
+make lint
+make vulncheck
 make examples
+make demos-help
 ```
 
 If you run Go commands directly, use:
@@ -36,6 +40,11 @@ If you run Go commands directly, use:
 ```bash
 bash scripts/go_with_cpp.sh go test ./...
 ```
+
+The repository keeps:
+
+- `examples/` for zero-setup local runs
+- `demos/` for multi-process/networked demo workflows with extra setup such as PEM cert generation
 
 ## Licensing
 

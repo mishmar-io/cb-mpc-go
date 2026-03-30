@@ -22,7 +22,7 @@ echo "Step 1: Generating CA certificate..."
 openssl genpkey -algorithm RSA -out "$OUTPUT_DIR/ca-key.pem" -pkeyopt rsa_keygen_bits:2048
 openssl req -new -x509 -key "$OUTPUT_DIR/ca-key.pem" -out "$OUTPUT_DIR/ca.pem" -days 365 \
     -subj "/C=US/ST=California/L=San Francisco/O=CB-MPC/CN=CA Root Certificate"
-echo "✅ CA certificate generated"
+echo "CA certificate generated"
 echo
 
 # Step 2: Generate certificates for each party
@@ -78,7 +78,7 @@ EOF
     # Clean up CSR
     rm "$PARTY_DIR/cert.csr"
 
-    echo "✅ Party $i certificate generated at $PARTY_DIR/"
+    echo "Party $i certificate generated at $PARTY_DIR/"
 done
 
 echo
@@ -90,6 +90,6 @@ for ((i=0; i<NUM_PARTIES; i++)); do
     echo "  - Party $i: $OUTPUT_DIR/party-$i/{key.pem,cert.pem}"
 done
 echo
-echo "⚠️  Keep private keys (*.pem) secure!"
-echo "⚠️  Generated certificates are for local demos/tests only."
-echo "✅ Ready for mTLS communication"
+echo "Keep private keys (*.pem) secure!"
+echo "Generated certificates are for local demos/tests only."
+echo "Ready for mTLS communication"

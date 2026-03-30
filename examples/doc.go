@@ -4,11 +4,10 @@
 //   - examples/ecdsa2pc
 //   - examples/schnorr2pc
 //   - examples/eddsa2pc
+//   - examples/eddsa_mp_backup
+//   - examples/pve_showcase
 //   - examples/tdh2
 //   - examples/pve_batch
 //
-// The mTLS session implementation in this package is a reference starting
-// point for real network deployments. It demonstrates one way to implement the
-// Session contract over a network, but it is not a hardened drop-in production
-// transport.
+// Production-like multi-process demos live under `demos/`.
 package examples

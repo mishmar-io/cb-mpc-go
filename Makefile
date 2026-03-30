@@ -1,9 +1,24 @@
-.PHONY: help build test test-short clean deps examples force-build-cpp
+.PHONY: help build test lint-install lint vulncheck clean deps examples demos-help demo-certs demo-ecdsa2pc-mtls demo-eddsa-mp-backup-mtls demo-ecdsa-mp-ac-mtls demo-tdh2-mtls force-build-cpp
 
 # Marker file to track if C++ library is built
 CPP_LIB := cb-mpc/build/install/public/lib/libcbmpc.a
 CPP_PUBLIC_HEADER := cb-mpc/build/install/public/include/cbmpc/c_api/common.h
 SUBMODULE_INIT := cb-mpc/.git
+
+DEMO_CERT_DIR ?= demos/tmp/certs/ecdsa2pc_mtls
+DEMO_CERT_PARTIES ?= 2
+DEMO_ECDSA2PC_ADDR := 127.0.0.1:9440
+DEMO_EDDSA_MP_CERT_DIR := demos/tmp/certs/eddsa_mp_backup_mtls
+DEMO_EDDSA_MP_ADDRS ?= auto
+DEMO_ECDSA_MP_AC_CERT_DIR := demos/tmp/certs/ecdsa_mp_ac_mtls
+DEMO_ECDSA_MP_AC_ADDRS ?= auto
+DEMO_TDH2_CERT_DIR := demos/tmp/certs/tdh2_mtls
+DEMO_TDH2_ADDRS ?= auto
+GOLANGCI_LINT_VERSION ?= v2.11.4
+GOLANGCI_LINT_BIN := $(CURDIR)/bin/golangci-lint
+GOVULNCHECK_VERSION ?= v1.1.4
+REPO_GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
+GOVULNCHECK_GOTOOLCHAIN ?= go$(REPO_GO_VERSION)+auto
 
 help:
 	@echo "Available targets:"
@@ -12,14 +27,25 @@ help:
 	@echo "  force-build-cpp - Force rebuild of C++ library"
 	@echo "  build        - Build Go wrapper (builds C++ if needed)"
 	@echo "  test         - Run Go tests (builds C++ if needed)"
-	@echo "  test-short   - Run Go tests without checking C++ build"
+	@echo "  lint-install - Install repo-local golangci-lint $(GOLANGCI_LINT_VERSION)"
+	@echo "  lint         - Run golangci-lint with the same version as CI"
+	@echo "  vulncheck    - Run govulncheck with the same version as CI"
 	@echo "  examples     - Run example programs"
+	@echo "  demos-help   - Show networked demo workflows"
+	@echo "  demo-certs   - Generate demo TLS certificates under $(DEMO_CERT_DIR)"
+	@echo "  demo-ecdsa2pc-mtls - Run the local two-process ECDSA-2PC mTLS demo"
+	@echo "  demo-eddsa-mp-backup-mtls - Run the local three-process EdDSA-MP backup showcase over mTLS"
+	@echo "  demo-ecdsa-mp-ac-mtls - Run the local three-process ECDSA-MP AC showcase over mTLS"
+	@echo "  demo-tdh2-mtls - Run the local three-process TDH2 showcase over mTLS"
 	@echo "  clean        - Clean Go build artifacts"
 	@echo "  clean-all    - Clean everything including cb-mpc build"
 
 # Initialize submodules if not already done
 $(SUBMODULE_INIT):
 	git submodule update --init --recursive
+
+deps: $(SUBMODULE_INIT)
+	@echo "Git submodules are initialized"
 
 # Build C++ library + public install if it doesn't exist or is outdated
 $(CPP_LIB): $(CPP_PUBLIC_HEADER)
@@ -45,9 +71,23 @@ build: $(CPP_LIB)
 test: $(CPP_LIB)
 	bash scripts/go_with_cpp.sh go test -v -race ./...
 
-# Run tests without checking C++ build (fast)
-test-short:
-	bash scripts/go_with_cpp.sh go test -v -short ./...
+lint-install:
+	@mkdir -p "$(dir $(GOLANGCI_LINT_BIN))"
+	@if [ ! -x "$(GOLANGCI_LINT_BIN)" ] || ! "$(GOLANGCI_LINT_BIN)" version 2>/dev/null | grep -q "$(GOLANGCI_LINT_VERSION)"; then \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT_BIN)"; \
+		tmpdir="$$(mktemp -d)"; \
+		trap 'rm -rf "$$tmpdir"' EXIT; \
+		curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$$tmpdir" "$(GOLANGCI_LINT_VERSION)" >/dev/null; \
+		mv "$$tmpdir/golangci-lint" "$(GOLANGCI_LINT_BIN)"; \
+	else \
+		echo "✅ golangci-lint $(GOLANGCI_LINT_VERSION) already installed at $(GOLANGCI_LINT_BIN)"; \
+	fi
+
+lint: $(CPP_LIB) lint-install
+	bash scripts/go_with_cpp.sh "$(GOLANGCI_LINT_BIN)" run ./...
+
+vulncheck: $(CPP_LIB)
+	env GOTOOLCHAIN="$(GOVULNCHECK_GOTOOLCHAIN)" bash scripts/go_with_cpp.sh go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 examples: $(CPP_LIB)
 	@echo "Running ECDSA-2PC example..."
@@ -56,10 +96,42 @@ examples: $(CPP_LIB)
 	bash scripts/go_with_cpp.sh go run examples/schnorr2pc/main.go
 	@echo "Running EdDSA-2PC example..."
 	bash scripts/go_with_cpp.sh go run examples/eddsa2pc/main.go
+	@echo "Running EdDSA-MP backup example..."
+	bash scripts/go_with_cpp.sh go run examples/eddsa_mp_backup/main.go
+	@echo "Running PVE showcase example..."
+	bash scripts/go_with_cpp.sh go run examples/pve_showcase/main.go
 	@echo "Running TDH2 example..."
 	bash scripts/go_with_cpp.sh go run examples/tdh2/main.go
 	@echo "Running PVE-Batch example..."
 	bash scripts/go_with_cpp.sh go run examples/pve_batch/main.go
+
+demos-help:
+	@echo "Networked reference demos live under demos/ and are not part of 'make examples'."
+	@echo "Try:"
+	@echo "  make demo-certs"
+	@echo "  make demo-ecdsa2pc-mtls"
+	@echo "  make demo-eddsa-mp-backup-mtls"
+	@echo "  make demo-ecdsa-mp-ac-mtls"
+	@echo "  make demo-tdh2-mtls"
+	@echo "Or run the demos manually as documented in demos/README.md."
+
+demo-certs:
+	bash scripts/certs/generate_certs.sh "$(DEMO_CERT_PARTIES)" "$(DEMO_CERT_DIR)"
+
+demo-ecdsa2pc-mtls: $(CPP_LIB) demo-certs
+	bash scripts/run_demo_ecdsa2pc_mtls.sh "$(DEMO_CERT_DIR)" "$(DEMO_ECDSA2PC_ADDR)"
+
+demo-eddsa-mp-backup-mtls: $(CPP_LIB)
+	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_EDDSA_MP_CERT_DIR)"
+	bash scripts/run_demo_eddsa_mp_backup_mtls.sh "$(DEMO_EDDSA_MP_CERT_DIR)" "$(DEMO_EDDSA_MP_ADDRS)"
+
+demo-ecdsa-mp-ac-mtls: $(CPP_LIB)
+	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_ECDSA_MP_AC_CERT_DIR)"
+	bash scripts/run_demo_ecdsa_mp_ac_mtls.sh "$(DEMO_ECDSA_MP_AC_CERT_DIR)" "$(DEMO_ECDSA_MP_AC_ADDRS)"
+
+demo-tdh2-mtls: $(CPP_LIB)
+	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_TDH2_CERT_DIR)"
+	bash scripts/run_demo_tdh2_mtls.sh "$(DEMO_TDH2_CERT_DIR)" "$(DEMO_TDH2_ADDRS)"
 
 clean:
 	go clean ./...

@@ -307,7 +307,7 @@ func TestPVEACPartyDecryptRowECIESP256HSM_RejectsNULLeafName(t *testing.T) {
 
 func TestGoTransportCallbacks_RecoverSessionPanics(t *testing.T) {
 	t.Run("send", func(t *testing.T) {
-		ctxPtr, err := registerSession(context.Background(), panicSession{sendPanic: true})
+		ctxPtr, _, err := registerSession(context.Background(), panicSession{sendPanic: true})
 		if err != nil {
 			t.Fatalf("registerSession: %v", err)
 		}
@@ -320,7 +320,7 @@ func TestGoTransportCallbacks_RecoverSessionPanics(t *testing.T) {
 	})
 
 	t.Run("receive", func(t *testing.T) {
-		ctxPtr, err := registerSession(context.Background(), panicSession{receivePanic: true})
+		ctxPtr, _, err := registerSession(context.Background(), panicSession{receivePanic: true})
 		if err != nil {
 			t.Fatalf("registerSession: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestGoTransportCallbacks_RecoverSessionPanics(t *testing.T) {
 	})
 
 	t.Run("receive all", func(t *testing.T) {
-		ctxPtr, err := registerSession(context.Background(), panicSession{receiveAllPanic: true})
+		ctxPtr, _, err := registerSession(context.Background(), panicSession{receiveAllPanic: true})
 		if err != nil {
 			t.Fatalf("registerSession: %v", err)
 		}

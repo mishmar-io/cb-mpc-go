@@ -1,10 +1,11 @@
-package examples
+package common
 
 import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,33 +19,64 @@ import (
 // This prevents a malicious peer from causing OOM via a large length prefix.
 const maxMessageSize = 64 * 1024 * 1024
 
-// MTLSSession is a reference mTLS-backed Session implementation.
-// It is intended as an example starting point, not a hardened drop-in
-// production transport.
+// MTLSSession is a reference mTLS-backed Session implementation for local demos.
+//
+// It supports a local full-mesh topology where each party may listen on its own
+// address and parties dial lower-index peers to avoid duplicate connections.
+// It is intended to demonstrate how callers can satisfy the mpc.Session
+// contract over TCP+mTLS, not to serve as a production-ready transport stack.
 type MTLSSession struct {
 	myIndex    int
 	partyCount int
 
-	// Network connections
 	listener  net.Listener
 	clients   []net.Conn
 	clientsMu sync.RWMutex
-	writeMu   []sync.Mutex // per-connection write lock to prevent interleaved framing
+	writeMu   []sync.Mutex
 
-	// Message queues for each party
 	messageQueues []chan []byte
 
-	// Control
 	ctx    context.Context
 	cancel context.CancelFunc
 	closed bool
 	mu     sync.Mutex
 }
 
-// NewMTLSSession creates a new mTLS-based session
-func NewMTLSSession(myIndex, partyCount int, serverAddr string, clientAddrs []string, tlsConfig *tls.Config) (*MTLSSession, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+// NewMTLSSession creates a new local demo mTLS session.
+//
+// The caller provides:
+//   - listenAddr for this party, if this party should accept inbound peer connections
+//   - partyAddrs indexed by party, so this party can dial lower-index peers
+//
+// To avoid duplicate connections, parties only dial peers with indices lower
+// than their own.
+//
+// This helper assumes a demo PKI model where peer identities are encoded as
+// party<N> certificate names and where clients may verify against localhost-like
+// names for loopback testing.
+func NewMTLSSession(myIndex, partyCount int, listenAddr string, partyAddrs []string, tlsConfig *tls.Config) (*MTLSSession, error) {
+	if tlsConfig == nil {
+		return nil, fmt.Errorf("tlsConfig cannot be nil")
+	}
+	if partyCount < 2 {
+		return nil, fmt.Errorf("partyCount must be at least 2, got %d", partyCount)
+	}
+	if len(partyAddrs) != partyCount {
+		return nil, fmt.Errorf("partyAddrs length mismatch: got %d want %d", len(partyAddrs), partyCount)
+	}
+	if myIndex < 0 || myIndex >= partyCount {
+		return nil, fmt.Errorf("myIndex %d out of range [0, %d)", myIndex, partyCount)
+	}
+	if myIndex < partyCount-1 && listenAddr == "" {
+		return nil, fmt.Errorf("listenAddr is required for party %d because higher-index peers dial this party", myIndex)
+	}
+	for peer := 0; peer < myIndex; peer++ {
+		if partyAddrs[peer] == "" {
+			return nil, fmt.Errorf("partyAddrs[%d] is required for party %d to dial lower-index peers", peer, myIndex)
+		}
+	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	session := &MTLSSession{
 		myIndex:       myIndex,
 		partyCount:    partyCount,
@@ -54,28 +86,67 @@ func NewMTLSSession(myIndex, partyCount int, serverAddr string, clientAddrs []st
 		ctx:           ctx,
 		cancel:        cancel,
 	}
-
-	// Initialize message queues
 	for i := 0; i < partyCount; i++ {
-		session.messageQueues[i] = make(chan []byte, 100) // Buffered channel
+		session.messageQueues[i] = make(chan []byte, 100)
 	}
 
-	// Start server if we're the designated server (usually party 0)
-	if myIndex == 0 && serverAddr != "" {
-		var err error
-		session.listener, err = tls.Listen("tcp", serverAddr, tlsConfig)
+	if listenAddr != "" {
+		listener, err := tls.Listen("tcp", listenAddr, tlsConfig)
 		if err != nil {
 			cancel()
-			return nil, fmt.Errorf("failed to start TLS listener: %v", err)
+			return nil, fmt.Errorf("failed to start TLS listener: %w", err)
 		}
-
+		session.listener = listener
 		go session.acceptConnections()
 	}
 
-	// Connect to other parties
-	go session.connectToParties(clientAddrs, tlsConfig)
-
+	go session.connectToParties(partyAddrs, tlsConfig)
 	return session, nil
+}
+
+// WaitForPeers blocks until connections to the requested peers are available.
+func (s *MTLSSession) WaitForPeers(ctx context.Context, peers []int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, peer := range peers {
+		if peer < 0 || peer >= s.partyCount || peer == s.myIndex {
+			return fmt.Errorf("invalid peer index %d", peer)
+		}
+	}
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if err := s.ctx.Err(); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		ready := true
+		s.clientsMu.RLock()
+		for _, peer := range peers {
+			if s.clients[peer] == nil {
+				ready = false
+				break
+			}
+		}
+		s.clientsMu.RUnlock()
+		if ready {
+			return nil
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		}
+	}
 }
 
 func (s *MTLSSession) acceptConnections() {
@@ -103,10 +174,10 @@ func (s *MTLSSession) acceptConnections() {
 	}
 }
 
-func (s *MTLSSession) connectToParties(clientAddrs []string, tlsConfig *tls.Config) {
-	for i, addr := range clientAddrs {
-		if i == s.myIndex || addr == "" {
-			continue // Skip self or empty addresses
+func (s *MTLSSession) connectToParties(partyAddrs []string, tlsConfig *tls.Config) {
+	for i, addr := range partyAddrs {
+		if i >= s.myIndex || addr == "" {
+			continue
 		}
 
 		go func(partyIndex int, address string) {
@@ -119,7 +190,7 @@ func (s *MTLSSession) connectToParties(clientAddrs []string, tlsConfig *tls.Conf
 
 				conn, err := tls.Dial("tcp", address, tlsConfig)
 				if err != nil {
-					time.Sleep(1 * time.Second) // Retry after delay
+					time.Sleep(1 * time.Second)
 					continue
 				}
 				peerIndex, err := s.peerPartyIndex(conn)
@@ -129,9 +200,11 @@ func (s *MTLSSession) connectToParties(clientAddrs []string, tlsConfig *tls.Conf
 					continue
 				}
 
-				s.clientsMu.Lock()
-				s.clients[partyIndex] = conn
-				s.clientsMu.Unlock()
+				registered := s.registerPeerConn(partyIndex, conn)
+				if !registered {
+					_ = conn.Close()
+					return
+				}
 
 				go s.handleConnection(conn)
 				return
@@ -190,13 +263,10 @@ func (s *MTLSSession) handleConnection(conn net.Conn) {
 		return
 	}
 
-	s.clientsMu.Lock()
-	if s.clients[peerIndex] == nil {
-		s.clients[peerIndex] = conn
+	if !s.registerPeerConn(peerIndex, conn) {
+		return
 	}
-	s.clientsMu.Unlock()
 
-	// Read messages from this connection
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -204,41 +274,46 @@ func (s *MTLSSession) handleConnection(conn net.Conn) {
 		default:
 		}
 
-		// Read message length (4 bytes)
 		var length uint32
-		err := binary.Read(conn, binary.BigEndian, &length)
-		if err != nil {
-			if err != io.EOF {
+		if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+			if err != io.EOF && !isExpectedCloseError(err) {
 				fmt.Printf("Error reading message length: %v\n", err)
 			}
 			return
 		}
-
 		if length > maxMessageSize {
 			fmt.Printf("Error: message too large: %d bytes (max %d)\n", length, maxMessageSize)
 			return
 		}
 
-		// Read message data
 		data := make([]byte, length)
-		_, err = io.ReadFull(conn, data)
-		if err != nil {
-			fmt.Printf("Error reading message data: %v\n", err)
+		if _, err := io.ReadFull(conn, data); err != nil {
+			if !isExpectedCloseError(err) {
+				fmt.Printf("Error reading message data: %v\n", err)
+			}
 			return
 		}
 
-		sender := peerIndex
-		message := data
-
-		// Apply backpressure instead of silently dropping protocol messages.
-		if sender >= 0 && sender < s.partyCount {
+		if peerIndex >= 0 && peerIndex < s.partyCount {
 			select {
-			case s.messageQueues[sender] <- message:
+			case s.messageQueues[peerIndex] <- data:
 			case <-s.ctx.Done():
 				return
 			}
 		}
 	}
+}
+
+func (s *MTLSSession) registerPeerConn(peerIndex int, conn net.Conn) bool {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	if existing := s.clients[peerIndex]; existing != nil {
+		// Prefer the already-registered connection and drop duplicates.
+		return existing == conn
+	}
+	s.clients[peerIndex] = conn
+	return true
 }
 
 func writeAll(conn net.Conn, data []byte) error {
@@ -252,7 +327,11 @@ func writeAll(conn net.Conn, data []byte) error {
 	return nil
 }
 
-// Send implements mpc.Session interface
+func isExpectedCloseError(err error) bool {
+	return errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
+}
+
+// Send implements mpc.Session.
 func (s *MTLSSession) Send(ctx context.Context, toParty int, msg []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -267,14 +346,13 @@ func (s *MTLSSession) Send(ctx context.Context, toParty int, msg []byte) error {
 	s.clientsMu.RLock()
 	conn := s.clients[toParty]
 	s.clientsMu.RUnlock()
-
 	if conn == nil {
 		return fmt.Errorf("no connection to party %d", toParty)
 	}
+	if len(msg) > maxMessageSize {
+		return fmt.Errorf("message too large: %d bytes (max %d)", len(msg), maxMessageSize)
+	}
 
-	fullMsg := msg
-
-	// Hold per-connection write lock so length+data are sent atomically.
 	s.writeMu[toParty].Lock()
 	defer s.writeMu[toParty].Unlock()
 
@@ -289,21 +367,18 @@ func (s *MTLSSession) Send(ctx context.Context, toParty int, msg []byte) error {
 		}()
 	}
 
-	// Send length + message
-	length := uint32(len(fullMsg))
-	err := binary.Write(conn, binary.BigEndian, length)
-	if err != nil {
-		return fmt.Errorf("failed to send message length: %v", err)
+	// #nosec G115 -- len(msg) is capped at maxMessageSize (64 MiB), well below uint32 max.
+	length := uint32(len(msg))
+	if err := binary.Write(conn, binary.BigEndian, length); err != nil {
+		return fmt.Errorf("failed to send message length: %w", err)
 	}
-
-	if err := writeAll(conn, fullMsg); err != nil {
-		return fmt.Errorf("failed to send message: %v", err)
+	if err := writeAll(conn, msg); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
 	}
-
 	return nil
 }
 
-// Receive implements mpc.Session interface
+// Receive implements mpc.Session.
 func (s *MTLSSession) Receive(ctx context.Context, fromParty int) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -318,14 +393,13 @@ func (s *MTLSSession) Receive(ctx context.Context, fromParty int) ([]byte, error
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-s.ctx.Done():
-		return nil, s.ctx.Err()
+		return nil, net.ErrClosed
 	}
 }
 
-// ReceiveAll implements mpc.Session interface
+// ReceiveAll implements mpc.Session.
 func (s *MTLSSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
 	results := make([][]byte, len(fromParties))
-
 	for i, party := range fromParties {
 		msg, err := s.Receive(ctx, party)
 		if err != nil {
@@ -333,21 +407,20 @@ func (s *MTLSSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]by
 		}
 		results[i] = msg
 	}
-
 	return results, nil
 }
 
-// MyIndex implements mpc.Session interface
+// MyIndex implements mpc.Session.
 func (s *MTLSSession) MyIndex() int {
 	return s.myIndex
 }
 
-// PartyCount implements mpc.Session interface
+// PartyCount implements mpc.Session.
 func (s *MTLSSession) PartyCount() int {
 	return s.partyCount
 }
 
-// Close implements mpc.Session interface
+// Close implements mpc.Session.
 func (s *MTLSSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,30 +429,31 @@ func (s *MTLSSession) Close() error {
 		return nil
 	}
 	s.closed = true
-
 	s.cancel()
 
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 	}
 
 	s.clientsMu.Lock()
 	for _, conn := range s.clients {
 		if conn != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 	s.clientsMu.Unlock()
-
 	return nil
 }
 
-// LoadTLSConfig loads TLS configuration from certificate files
+// LoadTLSConfig loads TLS configuration from PEM files for local loopback demos.
+//
+// For non-server callers it fixes ServerName to "localhost", matching the
+// generated demo certificates from scripts/certs/generate_certs.sh. Real
+// deployments should provide their own TLS configuration and naming model.
 func LoadTLSConfig(caCertFile, clientCertFile, clientKeyFile string, isServer bool) (*tls.Config, error) {
-	// Load CA certificate
 	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read CA certificate: %v", err)
+		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
 	}
 
 	caCertPool := x509.NewCertPool()
@@ -387,10 +461,9 @@ func LoadTLSConfig(caCertFile, clientCertFile, clientKeyFile string, isServer bo
 		return nil, fmt.Errorf("failed to parse CA certificate")
 	}
 
-	// Load client certificate
 	clientCert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load client certificate: %v", err)
+		return nil, fmt.Errorf("failed to load client certificate: %w", err)
 	}
 
 	config := &tls.Config{
@@ -400,10 +473,8 @@ func LoadTLSConfig(caCertFile, clientCertFile, clientKeyFile string, isServer bo
 		RootCAs:      caCertPool,
 		MinVersion:   tls.VersionTLS12,
 	}
-
 	if !isServer {
 		config.ServerName = "localhost"
 	}
-
 	return config, nil
 }

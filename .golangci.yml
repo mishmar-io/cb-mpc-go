@@ -41,7 +41,13 @@ linters:
       # directly; keep gosec focused on the shipped library packages.
       - linters:
           - gosec
-        path: "^examples/.*"
+        path: "^(examples|demos)/.*"
+      # Demo/example binaries intentionally use log.Fatal in main-style flows;
+      # avoid noisy exitAfterDefer findings there.
+      - linters:
+          - gocritic
+        text: "exitAfterDefer"
+        path: "^(examples|demos)/.*"
       # Test files intentionally exercise insecure/failure cases.
       - linters:
           - gosec

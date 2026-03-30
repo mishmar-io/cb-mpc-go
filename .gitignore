@@ -9,6 +9,23 @@ bin/
 # macOS noise
 .DS_Store
 
+# Local secrets / accidental credentials
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
 # Example build artifacts and generated files
 examples/**/build/
 examples/**/certs/*.pem
+examples/**/certs/**/*.pem
+examples/**/certs/*.der
+examples/**/certs/**/*.der
+
+# Demo build artifacts and generated files
+demos/tmp/
+demos/**/certs/**/*.pem
+demos/**/certs/**/*.der
+demos/**/certs/**/*.csr
+demos/**/certs/**/*.srl

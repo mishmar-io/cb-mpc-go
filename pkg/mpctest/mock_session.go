@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"net"
 	"sync"
 )
 
@@ -73,7 +74,7 @@ func (s *MockSession) Receive(ctx context.Context, fromParty int) ([]byte, error
 	defer s.mutex.Unlock()
 
 	if s.closed {
-		return nil, errors.New("session closed")
+		return nil, net.ErrClosed
 	}
 
 	queue := &s.queues[fromParty]
@@ -91,7 +92,7 @@ func (s *MockSession) Receive(ctx context.Context, fromParty int) ([]byte, error
 		}
 		s.cond.Wait()
 		if s.closed {
-			return nil, errors.New("session closed")
+			return nil, net.ErrClosed
 		}
 	}
 

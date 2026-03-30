@@ -47,8 +47,10 @@ import "C"
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"runtime"
 	"strings"
 	"sync"
@@ -130,6 +132,9 @@ type PVEBaseKEMCallbacks struct {
 type sessionContext struct {
 	ctx     context.Context
 	session Session
+
+	mu               sync.Mutex
+	lastTransportErr error
 }
 
 var (
@@ -141,22 +146,23 @@ var (
 	pveBaseKEMMap          sync.Map
 )
 
-func registerSession(ctx context.Context, session Session) (unsafe.Pointer, error) {
+func registerSession(ctx context.Context, session Session) (unsafe.Pointer, *sessionContext, error) {
 	if session == nil {
-		return nil, fmt.Errorf("session cannot be nil")
+		return nil, nil, fmt.Errorf("session cannot be nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ptr := C.malloc(1)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to allocate session context")
+		return nil, nil, fmt.Errorf("failed to allocate session context")
 	}
-	sessionMap.Store(ptr, &sessionContext{
+	sc := &sessionContext{
 		ctx:     ctx,
 		session: session,
-	})
-	return ptr, nil
+	}
+	sessionMap.Store(ptr, sc)
+	return ptr, sc, nil
 }
 
 func unregisterSession(ptr unsafe.Pointer) {
@@ -174,6 +180,61 @@ func getSession(ptr unsafe.Pointer) (*sessionContext, bool) {
 	}
 	sc, ok := value.(*sessionContext)
 	return sc, ok
+}
+
+var ErrTransportSessionClosed = errors.New("cgo: transport session closed")
+
+type TransportError struct {
+	Status error
+	Cause  error
+}
+
+func (e *TransportError) Error() string {
+	if e.Status == nil {
+		if e.Cause == nil {
+			return ""
+		}
+		return e.Cause.Error()
+	}
+	if e.Cause == nil {
+		return e.Status.Error()
+	}
+	return fmt.Sprintf("%v: %v", e.Status, e.Cause)
+}
+
+func (e *TransportError) Unwrap() []error {
+	errs := make([]error, 0, 2)
+	if e.Status != nil {
+		errs = append(errs, e.Status)
+	}
+	if e.Cause != nil {
+		errs = append(errs, e.Cause)
+	}
+	return errs
+}
+
+func normalizeTransportErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, net.ErrClosed) || strings.Contains(strings.ToLower(err.Error()), "session closed") {
+		return ErrTransportSessionClosed
+	}
+	return err
+}
+
+func (sc *sessionContext) storeTransportErr(err error) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.lastTransportErr = normalizeTransportErr(err)
+}
+
+func (sc *sessionContext) takeTransportErr() error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	err := sc.lastTransportErr
+	sc.lastTransportErr = nil
+	return err
 }
 
 func registerPVEBasePKECallbacks(cb *PVEBasePKECallbacks) (unsafe.Pointer, error) {
@@ -304,6 +365,33 @@ func getPVEBaseKEMCallbacks(ptr unsafe.Pointer) (*PVEBaseKEMCallbacks, bool) {
 	return cb, ok
 }
 
+type ErrorCode int32
+
+const (
+	ErrorCodeSuccess        ErrorCode = ErrorCode(C.CBMPC_SUCCESS)
+	ErrorCodeUninitialized  ErrorCode = ErrorCode(C.CBMPC_UNINITIALIZED_ERROR)
+	ErrorCodeGeneral        ErrorCode = ErrorCode(C.CBMPC_E_GENERAL)
+	ErrorCodeBadArgument    ErrorCode = ErrorCode(C.CBMPC_E_BADARG)
+	ErrorCodeFormat         ErrorCode = ErrorCode(C.CBMPC_E_FORMAT)
+	ErrorCodeNotSupported   ErrorCode = ErrorCode(C.CBMPC_E_NOT_SUPPORTED)
+	ErrorCodeNotFound       ErrorCode = ErrorCode(C.CBMPC_E_NOT_FOUND)
+	ErrorCodeInsufficient   ErrorCode = ErrorCode(C.CBMPC_E_INSUFFICIENT)
+	ErrorCodeRange          ErrorCode = ErrorCode(C.CBMPC_E_RANGE)
+	ErrorCodeNetworkGeneral ErrorCode = ErrorCode(C.CBMPC_E_NET_GENERAL)
+	ErrorCodeCrypto         ErrorCode = ErrorCode(C.CBMPC_E_CRYPTO)
+	ErrorCodeECDSA2PBitLeak ErrorCode = ErrorCode(C.CBMPC_E_ECDSA_2P_BIT_LEAK)
+)
+
+type StatusError struct {
+	Op      string
+	Code    ErrorCode
+	Message string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s failed: %s (code=%d)", e.Op, e.Message, int32(e.Code))
+}
+
 func codeError(op string, code C.cbmpc_error_t) error {
 	if code == C.CBMPC_SUCCESS {
 		return nil
@@ -335,7 +423,11 @@ func codeError(op string, code C.cbmpc_error_t) error {
 		msg = "ecdsa 2p bit leak error"
 	}
 
-	return fmt.Errorf("%s failed: %s (code=%d)", op, msg, int32(code))
+	return &StatusError{
+		Op:      op,
+		Code:    ErrorCode(code),
+		Message: msg,
+	}
 }
 
 func bytesToOwnedCmem(data []byte) (C.cmem_t, func(), error) {
@@ -639,7 +731,7 @@ func with2PCJob(ctx context.Context, session Session, self TwoPartySelf, p1Name,
 		return fmt.Errorf("party names cannot contain NUL bytes")
 	}
 
-	ctxPtr, err := registerSession(ctx, session)
+	ctxPtr, sc, err := registerSession(ctx, session)
 	if err != nil {
 		return err
 	}
@@ -683,7 +775,15 @@ func with2PCJob(ctx context.Context, session Session, self TwoPartySelf, p1Name,
 		transport: transportPtr,
 	}
 
-	return fn(jobPtr)
+	err = fn(jobPtr)
+	if err != nil {
+		if cause := sc.takeTransportErr(); cause != nil {
+			return &TransportError{Status: err, Cause: cause}
+		}
+		return err
+	}
+	_ = sc.takeTransportErr()
+	return nil
 }
 
 func withMPJob(ctx context.Context, session Session, self int, partyNames []string, fn func(*C.cbmpc_mp_job_t) error) error {
@@ -700,7 +800,7 @@ func withMPJob(ctx context.Context, session Session, self int, partyNames []stri
 		return fmt.Errorf("self index %d out of range [0, %d)", self, len(partyNames))
 	}
 
-	ctxPtr, err := registerSession(ctx, session)
+	ctxPtr, sc, err := registerSession(ctx, session)
 	if err != nil {
 		return err
 	}
@@ -739,7 +839,15 @@ func withMPJob(ctx context.Context, session Session, self int, partyNames []stri
 		transport:         transportPtr,
 	}
 
-	return fn(jobPtr)
+	err = fn(jobPtr)
+	if err != nil {
+		if cause := sc.takeTransportErr(); cause != nil {
+			return &TransportError{Status: err, Cause: cause}
+		}
+		return err
+	}
+	_ = sc.takeTransportErr()
+	return nil
 }
 
 type compiledAccessStructure struct {
@@ -1177,6 +1285,7 @@ func goTransportSend(ctx unsafe.Pointer, receiver C.int32_t, data *C.uint8_t, si
 		message = C.GoBytes(unsafe.Pointer(data), size)
 	}
 	if err := sc.session.Send(sc.ctx, int(receiver), message); err != nil {
+		sc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	return C.CBMPC_SUCCESS
@@ -1201,6 +1310,7 @@ func goTransportReceive(ctx unsafe.Pointer, sender C.int32_t, outMsg *C.cmem_t) 
 
 	message, err := sc.session.Receive(sc.ctx, int(sender))
 	if err != nil {
+		sc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	if len(message) > maxTransportMessageSize || len(message) > math.MaxInt32 {
@@ -1256,6 +1366,7 @@ func goTransportReceiveAll(ctx unsafe.Pointer, senders *C.int32_t, sendersCount 
 
 	messages, err := sc.session.ReceiveAll(sc.ctx, goSenders)
 	if err != nil {
+		sc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	if len(messages) != count {
@@ -2830,6 +2941,20 @@ func PVEBasePKEECIESP256EKFromOCT(pubKeyOct []byte) ([]byte, error) {
 	defer cleanup()
 	var outEK C.cmem_t
 	if err := codeError("cbmpc_pve_base_pke_ecies_p256_ek_from_oct", C.cbmpc_pve_base_pke_ecies_p256_ek_from_oct(pubKeyOctMem, &outEK)); err != nil {
+		freeCmem(outEK)
+		return nil, err
+	}
+	return cmemToBytesAndFree(outEK), nil
+}
+
+func PVEBasePKERSAEKFromModulus(modulus []byte) ([]byte, error) {
+	modulusMem, cleanup, err := bytesToOwnedCmem(modulus)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	var outEK C.cmem_t
+	if err := codeError("cbmpc_pve_base_pke_rsa_ek_from_modulus", C.cbmpc_pve_base_pke_rsa_ek_from_modulus(modulusMem, &outEK)); err != nil {
 		freeCmem(outEK)
 		return nil, err
 	}
