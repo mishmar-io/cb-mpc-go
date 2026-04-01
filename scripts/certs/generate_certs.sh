@@ -8,6 +8,22 @@ umask 077
 
 NUM_PARTIES=${1:-2}
 OUTPUT_DIR=${2:-"./certs"}
+PEER_LABELS=(alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu)
+
+if (( NUM_PARTIES > ${#PEER_LABELS[@]} )); then
+    echo "error: NUM_PARTIES=$NUM_PARTIES exceeds supported demo peer identity count ${#PEER_LABELS[@]}" >&2
+    exit 1
+fi
+
+peer_label() {
+    local index="$1"
+    printf '%s' "${PEER_LABELS[$index]}"
+}
+
+peer_dns_name() {
+    local index="$1"
+    printf 'peer-%s.demo.cbmpc.local' "$(peer_label "$index")"
+}
 
 echo "=== Generating TLS certificates for $NUM_PARTIES parties ==="
 echo "Output directory: $OUTPUT_DIR"
@@ -27,26 +43,28 @@ echo
 
 # Step 2: Generate certificates for each party
 for ((i=0; i<NUM_PARTIES; i++)); do
-    PARTY_DIR="$OUTPUT_DIR/party-$i"
+    PEER_LABEL="$(peer_label "$i")"
+    PEER_DNS_NAME="$(peer_dns_name "$i")"
+    PARTY_DIR="$OUTPUT_DIR/peer-$PEER_LABEL"
     mkdir -p "$PARTY_DIR"
 
-    echo "Step 2.$i: Generating certificate for party $i..."
+    echo "Step 2.$i: Generating certificate for demo peer '$PEER_LABEL' ($PEER_DNS_NAME)..."
 
     # Create OpenSSL config for this party
     cat > "$PARTY_DIR/openssl.cnf" <<EOF
 [ req ]
 default_bits       = 2048
-distinguished_name = party$i
+distinguished_name = dn
 req_extensions     = req_ext
 x509_extensions    = v3_req
 prompt             = no
 
-[ party$i ]
+[ dn ]
 countryName                = US
 stateOrProvinceName        = California
 localityName               = San Francisco
 organizationName           = CB-MPC
-commonName                 = party$i
+commonName                 = $PEER_DNS_NAME
 
 [ req_ext ]
 subjectAltName = @alt_names
@@ -55,7 +73,7 @@ subjectAltName = @alt_names
 subjectAltName = @alt_names
 
 [ alt_names ]
-DNS.1 = party$i
+DNS.1 = $PEER_DNS_NAME
 DNS.2 = localhost
 IP.1  = 127.0.0.1
 EOF
@@ -78,7 +96,7 @@ EOF
     # Clean up CSR
     rm "$PARTY_DIR/cert.csr"
 
-    echo "Party $i certificate generated at $PARTY_DIR/"
+    echo "Demo peer '$PEER_LABEL' certificate generated at $PARTY_DIR/"
 done
 
 echo
@@ -87,7 +105,7 @@ echo "Files generated:"
 echo "  - CA certificate: $OUTPUT_DIR/ca.pem"
 echo "  - CA private key: $OUTPUT_DIR/ca-key.pem"
 for ((i=0; i<NUM_PARTIES; i++)); do
-    echo "  - Party $i: $OUTPUT_DIR/party-$i/{key.pem,cert.pem}"
+    echo "  - Demo peer '$(peer_label "$i")': $OUTPUT_DIR/peer-$(peer_label "$i")/{key.pem,cert.pem}"
 done
 echo
 echo "Keep private keys (*.pem) secure!"

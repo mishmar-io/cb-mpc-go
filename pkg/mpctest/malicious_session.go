@@ -6,9 +6,9 @@ import (
 	"sync"
 )
 
-// MaliciousSession wraps a normal session with adversarial behavior for tests.
-type MaliciousSession struct {
-	inner    Session
+// MaliciousTransport wraps a normal transport with adversarial behavior for tests.
+type MaliciousTransport struct {
+	inner    Transport
 	behavior MaliciousBehavior
 	mutex    sync.Mutex
 
@@ -51,18 +51,18 @@ type MaliciousBehavior struct {
 	FlipRandomBits bool
 }
 
-// NewMaliciousSession wraps a session with malicious behavior.
-func NewMaliciousSession(inner Session, behavior MaliciousBehavior) *MaliciousSession {
-	return &MaliciousSession{
+// NewMaliciousTransport wraps a transport with malicious behavior.
+func NewMaliciousTransport(inner Transport, behavior MaliciousBehavior) *MaliciousTransport {
+	return &MaliciousTransport{
 		inner:    inner,
 		behavior: behavior,
 	}
 }
 
-// Send implements Session.Send with malicious behavior.
-func (m *MaliciousSession) Send(ctx context.Context, toParty int, msg []byte) error {
+// Send implements Transport.Send with malicious behavior.
+func (m *MaliciousTransport) Send(ctx context.Context, toParty int, msg []byte) error {
 	if m.inner == nil {
-		return errors.New("malicious: inner session is nil")
+		return errors.New("malicious: inner transport is nil")
 	}
 
 	m.mutex.Lock()
@@ -136,10 +136,10 @@ func (m *MaliciousSession) Send(ctx context.Context, toParty int, msg []byte) er
 	return m.inner.Send(ctx, toParty, msg)
 }
 
-// Receive implements Session.Receive with malicious behavior.
-func (m *MaliciousSession) Receive(ctx context.Context, fromParty int) ([]byte, error) {
+// Receive implements Transport.Receive with malicious behavior.
+func (m *MaliciousTransport) Receive(ctx context.Context, fromParty int) ([]byte, error) {
 	if m.inner == nil {
-		return nil, errors.New("malicious: inner session is nil")
+		return nil, errors.New("malicious: inner transport is nil")
 	}
 
 	m.mutex.Lock()
@@ -162,10 +162,10 @@ func (m *MaliciousSession) Receive(ctx context.Context, fromParty int) ([]byte, 
 	return m.inner.Receive(ctx, fromParty)
 }
 
-// ReceiveAll implements Session.ReceiveAll with malicious behavior.
-func (m *MaliciousSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
+// ReceiveAll implements Transport.ReceiveAll with malicious behavior.
+func (m *MaliciousTransport) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
 	if m.inner == nil {
-		return nil, errors.New("malicious: inner session is nil")
+		return nil, errors.New("malicious: inner transport is nil")
 	}
 
 	m.mutex.Lock()
@@ -188,33 +188,41 @@ func (m *MaliciousSession) ReceiveAll(ctx context.Context, fromParties []int) ([
 	return m.inner.ReceiveAll(ctx, fromParties)
 }
 
-// MyIndex implements Session.MyIndex.
-func (m *MaliciousSession) MyIndex() int {
-	return m.inner.MyIndex()
+// MyIndex exposes the wrapped transport's local index when available.
+func (m *MaliciousTransport) MyIndex() int {
+	indexed, ok := m.inner.(interface{ MyIndex() int })
+	if !ok {
+		return -1
+	}
+	return indexed.MyIndex()
 }
 
-// PartyCount implements Session.PartyCount.
-func (m *MaliciousSession) PartyCount() int {
-	return m.inner.PartyCount()
+// PartyCount exposes the wrapped transport's party count when available.
+func (m *MaliciousTransport) PartyCount() int {
+	counted, ok := m.inner.(interface{ PartyCount() int })
+	if !ok {
+		return -1
+	}
+	return counted.PartyCount()
 }
 
-// Close implements Session.Close.
-func (m *MaliciousSession) Close() error {
+// Close implements Transport.Close.
+func (m *MaliciousTransport) Close() error {
 	return m.inner.Close()
 }
 
 // NewMaliciousNetwork creates a mock network where one party is malicious.
-func NewMaliciousNetwork(nParties int, maliciousParty int, behavior MaliciousBehavior) []Session {
-	mockSessions := NewMockNetwork(nParties)
+func NewMaliciousNetwork(nParties int, maliciousParty int, behavior MaliciousBehavior) []Transport {
+	mockTransports := NewMockNetwork(nParties)
 
-	sessions := make([]Session, nParties)
+	transports := make([]Transport, nParties)
 	for i := 0; i < nParties; i++ {
 		if i == maliciousParty {
-			sessions[i] = NewMaliciousSession(mockSessions[i], behavior)
+			transports[i] = NewMaliciousTransport(mockTransports[i], behavior)
 		} else {
-			sessions[i] = mockSessions[i]
+			transports[i] = mockTransports[i]
 		}
 	}
 
-	return sessions
+	return transports
 }

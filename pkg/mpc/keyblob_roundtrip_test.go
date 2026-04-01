@@ -14,11 +14,12 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("ecdsa-2p", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(2)
+		jobs := test2PJobs("roundtrip/ecdsa-2p", sessions)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := ECDSA2PDKG(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, err := ECDSA2PDKG(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg: %w", err)
 			}
@@ -77,7 +78,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		hash := sha256.Sum256([]byte("ecdsa-2p-detach-attach"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			_, sigDER, err := ECDSA2PSign(ctx, sessions[idx], reattachedKeyBlobs[idx], hash[:], nil)
+			_, sigDER, err := ECDSA2PSign(ctx, jobs[idx], reattachedKeyBlobs[idx], hash[:], nil)
 			if err != nil {
 				return fmt.Errorf("sign: %w", err)
 			}
@@ -90,11 +91,13 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("ecdsa-mp", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(3)
+		partyNames := testPartyNames("roundtrip/ecdsa-mp", len(sessions))
+		jobs := jobsMP(sessions, partyNames)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, _, err := ECDSAMPDKGAdditive(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, _, err := ECDSAMPDKGAdditive(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg additive: %w", err)
 			}
@@ -153,7 +156,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		hash := sha256.Sum256([]byte("ecdsa-mp-detach-attach"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sigDER, err := ECDSAMPSignAdditive(ctx, sessions[idx], reattachedKeyBlobs[idx], hash[:], 0)
+			sigDER, err := ECDSAMPSignAdditive(ctx, jobs[idx], reattachedKeyBlobs[idx], hash[:], 0)
 			if err != nil {
 				return fmt.Errorf("sign additive: %w", err)
 			}
@@ -166,11 +169,12 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("eddsa-2p", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(2)
+		jobs := test2PJobs("roundtrip/eddsa-2p", sessions)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := EdDSA2PDKG(ctx, sessions[idx], CurveEd25519)
+			keyBlob, err := EdDSA2PDKG(ctx, jobs[idx], CurveEd25519)
 			if err != nil {
 				return fmt.Errorf("dkg: %w", err)
 			}
@@ -229,7 +233,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		msg := []byte("eddsa-2p-detach-attach")
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := EdDSA2PSign(ctx, sessions[idx], reattachedKeyBlobs[idx], msg)
+			sig, err := EdDSA2PSign(ctx, jobs[idx], reattachedKeyBlobs[idx], msg)
 			if err != nil {
 				return fmt.Errorf("sign: %w", err)
 			}
@@ -245,11 +249,13 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("eddsa-mp", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(3)
+		partyNames := testPartyNames("roundtrip/eddsa-mp", len(sessions))
+		jobs := jobsMP(sessions, partyNames)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, _, err := EdDSAMPDKGAdditive(ctx, sessions[idx], CurveEd25519)
+			keyBlob, _, err := EdDSAMPDKGAdditive(ctx, jobs[idx], CurveEd25519)
 			if err != nil {
 				return fmt.Errorf("dkg additive: %w", err)
 			}
@@ -308,7 +314,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		msg := []byte("eddsa-mp-detach-attach")
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := EdDSAMPSignAdditive(ctx, sessions[idx], reattachedKeyBlobs[idx], msg, 0)
+			sig, err := EdDSAMPSignAdditive(ctx, jobs[idx], reattachedKeyBlobs[idx], msg, 0)
 			if err != nil {
 				return fmt.Errorf("sign additive: %w", err)
 			}
@@ -324,11 +330,12 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("schnorr-2p", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(2)
+		jobs := test2PJobs("roundtrip/schnorr-2p", sessions)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := Schnorr2PDKG(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, err := Schnorr2PDKG(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg: %w", err)
 			}
@@ -387,7 +394,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		msgHash := sha256.Sum256([]byte("schnorr-2p-detach-attach"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := Schnorr2PSign(ctx, sessions[idx], reattachedKeyBlobs[idx], msgHash[:])
+			sig, err := Schnorr2PSign(ctx, jobs[idx], reattachedKeyBlobs[idx], msgHash[:])
 			if err != nil {
 				return fmt.Errorf("sign: %w", err)
 			}
@@ -403,11 +410,13 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 	t.Run("schnorr-mp", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(3)
+		partyNames := testPartyNames("roundtrip/schnorr-mp", len(sessions))
+		jobs := jobsMP(sessions, partyNames)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, _, err := SchnorrMPDKGAdditive(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, _, err := SchnorrMPDKGAdditive(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg additive: %w", err)
 			}
@@ -466,7 +475,7 @@ func TestDetachAttachRoundTrips(t *testing.T) {
 		msgHash := sha256.Sum256([]byte("schnorr-mp-detach-attach"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := SchnorrMPSignAdditive(ctx, sessions[idx], reattachedKeyBlobs[idx], msgHash[:], 0)
+			sig, err := SchnorrMPSignAdditive(ctx, jobs[idx], reattachedKeyBlobs[idx], msgHash[:], 0)
 			if err != nil {
 				return fmt.Errorf("sign additive: %w", err)
 			}

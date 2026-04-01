@@ -1,4 +1,4 @@
-.PHONY: help build test lint-install lint vulncheck clean deps examples demos-help demo-certs demo-ecdsa2pc-mtls demo-eddsa-mp-backup-mtls demo-ecdsa-mp-ac-mtls demo-tdh2-mtls force-build-cpp
+.PHONY: help build test sanitize-go lint-install lint vulncheck clean deps examples demos-help demo-certs demo-ecdsa2pc-mtls demo-eddsa-mp-backup-mtls demo-ecdsa-mp-ac-mtls demo-ecdsa-mp-ac-web demo-tdh2-mtls force-build-cpp verify-mods
 
 # Marker file to track if C++ library is built
 CPP_LIB := cb-mpc/build/install/public/lib/libcbmpc.a
@@ -12,6 +12,11 @@ DEMO_EDDSA_MP_CERT_DIR := demos/tmp/certs/eddsa_mp_backup_mtls
 DEMO_EDDSA_MP_ADDRS ?= auto
 DEMO_ECDSA_MP_AC_CERT_DIR := demos/tmp/certs/ecdsa_mp_ac_mtls
 DEMO_ECDSA_MP_AC_ADDRS ?= auto
+DEMO_ECDSA_MP_AC_WEB_CERT_DIR := demos/ecdsa_mp_ac_web/tmp/certs
+DEMO_ECDSA_MP_AC_WEB_HTTP_ADDRS ?= 127.0.0.1:7080,127.0.0.1:7081,127.0.0.1:7082
+DEMO_ECDSA_MP_AC_WEB_TRANSPORT_ADDRS ?= 127.0.0.1:9680,127.0.0.1:9681,127.0.0.1:9682
+DEMO_ECDSA_MP_AC_WEB_STATE_DIR ?= demos/ecdsa_mp_ac_web/tmp/state
+DEMO_ECDSA_MP_AC_WEB_MODULE_DIR := demos/ecdsa_mp_ac_web
 DEMO_TDH2_CERT_DIR := demos/tmp/certs/tdh2_mtls
 DEMO_TDH2_ADDRS ?= auto
 GOLANGCI_LINT_VERSION ?= v2.11.4
@@ -27,8 +32,10 @@ help:
 	@echo "  force-build-cpp - Force rebuild of C++ library"
 	@echo "  build        - Build Go wrapper (builds C++ if needed)"
 	@echo "  test         - Run Go tests (builds C++ if needed)"
+	@echo "  sanitize-go  - Run ASAN/UBSAN coverage for the CGO boundary"
 	@echo "  lint-install - Install repo-local golangci-lint $(GOLANGCI_LINT_VERSION)"
 	@echo "  lint         - Run golangci-lint with the same version as CI"
+	@echo "  verify-mods  - Verify go.mod/go.sum for the root and isolated demo modules"
 	@echo "  vulncheck    - Run govulncheck with the same version as CI"
 	@echo "  examples     - Run example programs"
 	@echo "  demos-help   - Show networked demo workflows"
@@ -36,6 +43,7 @@ help:
 	@echo "  demo-ecdsa2pc-mtls - Run the local two-process ECDSA-2PC mTLS demo"
 	@echo "  demo-eddsa-mp-backup-mtls - Run the local three-process EdDSA-MP backup showcase over mTLS"
 	@echo "  demo-ecdsa-mp-ac-mtls - Run the local three-process ECDSA-MP AC showcase over mTLS"
+	@echo "  demo-ecdsa-mp-ac-web - Run the local three-party browser-driven ECDSA-MP AC web demo"
 	@echo "  demo-tdh2-mtls - Run the local three-process TDH2 showcase over mTLS"
 	@echo "  clean        - Clean Go build artifacts"
 	@echo "  clean-all    - Clean everything including cb-mpc build"
@@ -46,6 +54,10 @@ $(SUBMODULE_INIT):
 
 deps: $(SUBMODULE_INIT)
 	@echo "Git submodules are initialized"
+
+verify-mods:
+	go mod verify
+	go -C "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)" mod verify
 
 # Build C++ library + public install if it doesn't exist or is outdated
 $(CPP_LIB): $(CPP_PUBLIC_HEADER)
@@ -66,10 +78,15 @@ force-build-cpp: $(SUBMODULE_INIT)
 # Build Go code (will build C++ if needed)
 build: $(CPP_LIB)
 	bash scripts/go_with_cpp.sh go build ./...
+	bash scripts/go_with_cpp.sh go -C "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)" build ./...
 
 # Run tests (will build C++ if needed)
 test: $(CPP_LIB)
 	bash scripts/go_with_cpp.sh go test -v -race ./...
+	bash scripts/go_with_cpp.sh go -C "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)" test -v -race ./...
+
+sanitize-go:
+	bash scripts/sanitize_go.sh
 
 lint-install:
 	@mkdir -p "$(dir $(GOLANGCI_LINT_BIN))"
@@ -85,6 +102,7 @@ lint-install:
 
 lint: $(CPP_LIB) lint-install
 	bash scripts/go_with_cpp.sh "$(GOLANGCI_LINT_BIN)" run ./...
+	cd "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)" && bash ../../scripts/go_with_cpp.sh "$(abspath $(GOLANGCI_LINT_BIN))" run ./...
 
 vulncheck: $(CPP_LIB)
 	env GOTOOLCHAIN="$(GOVULNCHECK_GOTOOLCHAIN)" bash scripts/go_with_cpp.sh go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
@@ -112,6 +130,7 @@ demos-help:
 	@echo "  make demo-ecdsa2pc-mtls"
 	@echo "  make demo-eddsa-mp-backup-mtls"
 	@echo "  make demo-ecdsa-mp-ac-mtls"
+	@echo "  make demo-ecdsa-mp-ac-web"
 	@echo "  make demo-tdh2-mtls"
 	@echo "Or run the demos manually as documented in demos/README.md."
 
@@ -129,12 +148,17 @@ demo-ecdsa-mp-ac-mtls: $(CPP_LIB)
 	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_ECDSA_MP_AC_CERT_DIR)"
 	bash scripts/run_demo_ecdsa_mp_ac_mtls.sh "$(DEMO_ECDSA_MP_AC_CERT_DIR)" "$(DEMO_ECDSA_MP_AC_ADDRS)"
 
+demo-ecdsa-mp-ac-web: $(CPP_LIB)
+	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_ECDSA_MP_AC_WEB_CERT_DIR)"
+	bash "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)/run_demo.sh" "$(DEMO_ECDSA_MP_AC_WEB_CERT_DIR)" "$(DEMO_ECDSA_MP_AC_WEB_HTTP_ADDRS)" "$(DEMO_ECDSA_MP_AC_WEB_TRANSPORT_ADDRS)" "$(DEMO_ECDSA_MP_AC_WEB_STATE_DIR)"
+
 demo-tdh2-mtls: $(CPP_LIB)
 	$(MAKE) demo-certs DEMO_CERT_PARTIES=3 DEMO_CERT_DIR="$(DEMO_TDH2_CERT_DIR)"
 	bash scripts/run_demo_tdh2_mtls.sh "$(DEMO_TDH2_CERT_DIR)" "$(DEMO_TDH2_ADDRS)"
 
 clean:
 	go clean ./...
+	go -C "$(DEMO_ECDSA_MP_AC_WEB_MODULE_DIR)" clean ./...
 
 clean-all: clean
 	cd cb-mpc && make clean || true

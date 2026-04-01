@@ -7,19 +7,25 @@ import (
 	"fmt"
 	"testing"
 
+	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	secp256k1ecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+
 	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
 )
 
 func TestECDSAMPACFlow(t *testing.T) {
 	ctx := testContext(t)
-	access, quorumPartyIndices := thresholdAccessStructure()
 	sessions := mpctest.NewMockNetwork(3)
+	partyNames := testPartyNames("ac/ecdsa-mp", len(sessions))
+	access, quorumPartyIndices := thresholdAccessStructure(partyNames)
+	quorumPartyNames := mustPartyNamesFromIndices(t, partyNames, quorumPartyIndices)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 	acKeyBlobs := make([][]byte, len(sessions))
 	sidOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		acKeyBlob, sidOut, err := ECDSAMPDKGAC(ctx, sessions[idx], CurveSecp256k1, nil, access, quorumPartyIndices)
+		acKeyBlob, sidOut, err := ECDSAMPDKGAC(ctx, jobs[idx], CurveSecp256k1, nil, access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("dkg ac: %w", err)
 		}
@@ -30,22 +36,28 @@ func TestECDSAMPACFlow(t *testing.T) {
 	requireAllEqualNonEmptyBytes(t, "ecdsa mp ac sid", sidOuts)
 
 	pubKeys := make([][]byte, len(acKeyBlobs))
+	publicShares := make([][]byte, len(acKeyBlobs))
+	privateScalars := make([][]byte, len(acKeyBlobs))
 	for i, keyBlob := range acKeyBlobs {
 		pubKey, err := ECDSAMPGetPublicKeyCompressed(keyBlob)
 		if err != nil {
 			t.Fatalf("get public key for party %d: %v", i, err)
 		}
+		publicShare, privateScalar := requireExtractECDSAMPShareMaterial(t, keyBlob, i)
 		pubKeys[i] = pubKey
+		publicShares[i] = publicShare
+		privateScalars[i] = privateScalar
 	}
 	originalPubKey := requireAllEqualNonEmptyBytes(t, "ecdsa mp ac public key", pubKeys)
 
 	signSessions := mpctest.NewMockNetwork(len(quorumPartyIndices))
+	signJobs := jobsMP(signSessions, quorumPartyNames)
 	t.Cleanup(func() { closeMockSessions(t, signSessions) })
 
 	hash := sha256.Sum256([]byte("ecdsa-mp-ac-flow"))
 	sigs := make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := ECDSAMPSignAC(ctx, signSessions[idx], acKeyBlobs[idx], access, hash[:], 0)
+		sig, err := ECDSAMPSignAC(ctx, signJobs[idx], acKeyBlobs[idx], access, hash[:], 0)
 		if err != nil {
 			return fmt.Errorf("sign ac: %w", err)
 		}
@@ -57,7 +69,7 @@ func TestECDSAMPACFlow(t *testing.T) {
 	refreshedKeyBlobs := make([][]byte, len(sessions))
 	refreshedSIDOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		sidOut, refreshedKeyBlob, err := ECDSAMPRefreshAC(ctx, sessions[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyIndices)
+		sidOut, refreshedKeyBlob, err := ECDSAMPRefreshAC(ctx, jobs[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("refresh ac: %w", err)
 		}
@@ -68,20 +80,33 @@ func TestECDSAMPACFlow(t *testing.T) {
 	requireAllEqualNonEmptyBytes(t, "ecdsa mp ac refresh sid", refreshedSIDOuts)
 
 	refreshedPubKeys := make([][]byte, len(refreshedKeyBlobs))
+	refreshedPublicShares := make([][]byte, len(refreshedKeyBlobs))
+	refreshedPrivateScalars := make([][]byte, len(refreshedKeyBlobs))
 	for i, keyBlob := range refreshedKeyBlobs {
 		pubKey, err := ECDSAMPGetPublicKeyCompressed(keyBlob)
 		if err != nil {
 			t.Fatalf("get refreshed public key for party %d: %v", i, err)
 		}
+		publicShare, privateScalar := requireExtractECDSAMPShareMaterial(t, keyBlob, i)
 		refreshedPubKeys[i] = pubKey
+		refreshedPublicShares[i] = publicShare
+		refreshedPrivateScalars[i] = privateScalar
 	}
 	if !bytes.Equal(originalPubKey, requireAllEqualNonEmptyBytes(t, "refreshed ecdsa mp ac public key", refreshedPubKeys)) {
 		t.Fatalf("ecdsa mp ac public key changed across refresh")
 	}
+	for i := range refreshedKeyBlobs {
+		if bytes.Equal(publicShares[i], refreshedPublicShares[i]) {
+			t.Fatalf("party %d public share did not change across refresh", i)
+		}
+		if bytes.Equal(privateScalars[i], refreshedPrivateScalars[i]) {
+			t.Fatalf("party %d private scalar did not change across refresh", i)
+		}
+	}
 
 	sigs = make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := ECDSAMPSignAC(ctx, signSessions[idx], refreshedKeyBlobs[idx], access, hash[:], 0)
+		sig, err := ECDSAMPSignAC(ctx, signJobs[idx], refreshedKeyBlobs[idx], access, hash[:], 0)
 		if err != nil {
 			return fmt.Errorf("sign refreshed ac: %w", err)
 		}
@@ -91,16 +116,82 @@ func TestECDSAMPACFlow(t *testing.T) {
 	requireValidECDSADER(t, requireSignatureOnlyOnReceiver(t, "refreshed ecdsa mp ac signature", sigs, 0))
 }
 
+func TestECDSAMPACFlowSupportsDifferentSigningQuorums(t *testing.T) {
+	ctx := testContext(t)
+	sessions := mpctest.NewMockNetwork(3)
+	partyNames := testPartyNames("ac/ecdsa-mp-flex-sign", len(sessions))
+	access, dkgQuorumIndices := thresholdAccessStructure(partyNames)
+	dkgQuorumPartyNames := mustPartyNamesFromIndices(t, partyNames, dkgQuorumIndices)
+	jobs := jobsMP(sessions, partyNames)
+	t.Cleanup(func() { closeMockSessions(t, sessions) })
+
+	acKeyBlobs := make([][]byte, len(sessions))
+	runPerParty(t, sessions, func(idx int) error {
+		acKeyBlob, _, err := ECDSAMPDKGAC(ctx, jobs[idx], CurveSecp256k1, nil, access, dkgQuorumPartyNames)
+		if err != nil {
+			return fmt.Errorf("dkg ac: %w", err)
+		}
+		acKeyBlobs[idx] = acKeyBlob
+		return nil
+	})
+
+	pubKeys := make([][]byte, len(acKeyBlobs))
+	for i, keyBlob := range acKeyBlobs {
+		pubKey, err := ECDSAMPGetPublicKeyCompressed(keyBlob)
+		if err != nil {
+			t.Fatalf("get public key for party %d: %v", i, err)
+		}
+		pubKeys[i] = pubKey
+	}
+	publicKey := requireAllEqualNonEmptyBytes(t, "ecdsa mp ac flexible sign public key", pubKeys)
+
+	testCases := []struct {
+		name          string
+		quorumIndices []int
+	}{
+		{name: "parties-0-1", quorumIndices: []int{0, 1}},
+		{name: "parties-0-2", quorumIndices: []int{0, 2}},
+		{name: "parties-1-2", quorumIndices: []int{1, 2}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			signSessions := mpctest.NewMockNetwork(len(tc.quorumIndices))
+			signPartyNames := mustPartyNamesFromIndices(t, partyNames, tc.quorumIndices)
+			signJobs := jobsMP(signSessions, signPartyNames)
+			defer closeMockSessions(t, signSessions)
+
+			hash := sha256.Sum256([]byte("ecdsa-mp-ac-flex-sign/" + tc.name))
+			sigs := make([][]byte, len(signSessions))
+			runPerParty(t, signSessions, func(idx int) error {
+				fullPartyIdx := tc.quorumIndices[idx]
+				sig, err := ECDSAMPSignAC(ctx, signJobs[idx], acKeyBlobs[fullPartyIdx], access, hash[:], 0)
+				if err != nil {
+					return fmt.Errorf("sign ac: %w", err)
+				}
+				sigs[idx] = sig
+				return nil
+			})
+
+			sig := requireSignatureOnlyOnReceiver(t, "ecdsa mp ac flexible sign signature", sigs, 0)
+			requireValidECDSADER(t, sig)
+			requireValidSecp256k1ECDSASignature(t, publicKey, hash[:], sig)
+		})
+	}
+}
+
 func TestEdDSAMPACFlow(t *testing.T) {
 	ctx := testContext(t)
-	access, quorumPartyIndices := thresholdAccessStructure()
 	sessions := mpctest.NewMockNetwork(3)
+	partyNames := testPartyNames("ac/eddsa-mp", len(sessions))
+	access, quorumPartyIndices := thresholdAccessStructure(partyNames)
+	quorumPartyNames := mustPartyNamesFromIndices(t, partyNames, quorumPartyIndices)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 	acKeyBlobs := make([][]byte, len(sessions))
 	sidOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		acKeyBlob, sidOut, err := EdDSAMPDKGAC(ctx, sessions[idx], CurveEd25519, nil, access, quorumPartyIndices)
+		acKeyBlob, sidOut, err := EdDSAMPDKGAC(ctx, jobs[idx], CurveEd25519, nil, access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("dkg ac: %w", err)
 		}
@@ -121,12 +212,13 @@ func TestEdDSAMPACFlow(t *testing.T) {
 	pubKey := requireAllEqualNonEmptyBytes(t, "eddsa mp ac public key", pubKeys)
 
 	signSessions := mpctest.NewMockNetwork(len(quorumPartyIndices))
+	signJobs := jobsMP(signSessions, quorumPartyNames)
 	t.Cleanup(func() { closeMockSessions(t, signSessions) })
 
 	msg := []byte("eddsa-mp-ac-flow")
 	sigs := make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := EdDSAMPSignAC(ctx, signSessions[idx], acKeyBlobs[idx], access, msg, 0)
+		sig, err := EdDSAMPSignAC(ctx, signJobs[idx], acKeyBlobs[idx], access, msg, 0)
 		if err != nil {
 			return fmt.Errorf("sign ac: %w", err)
 		}
@@ -141,7 +233,7 @@ func TestEdDSAMPACFlow(t *testing.T) {
 	refreshedKeyBlobs := make([][]byte, len(sessions))
 	refreshedSIDOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		sidOut, refreshedKeyBlob, err := EdDSAMPRefreshAC(ctx, sessions[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyIndices)
+		sidOut, refreshedKeyBlob, err := EdDSAMPRefreshAC(ctx, jobs[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("refresh ac: %w", err)
 		}
@@ -165,7 +257,7 @@ func TestEdDSAMPACFlow(t *testing.T) {
 
 	sigs = make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := EdDSAMPSignAC(ctx, signSessions[idx], refreshedKeyBlobs[idx], access, msg, 0)
+		sig, err := EdDSAMPSignAC(ctx, signJobs[idx], refreshedKeyBlobs[idx], access, msg, 0)
 		if err != nil {
 			return fmt.Errorf("sign refreshed ac: %w", err)
 		}
@@ -180,14 +272,17 @@ func TestEdDSAMPACFlow(t *testing.T) {
 
 func TestSchnorrMPACFlow(t *testing.T) {
 	ctx := testContext(t)
-	access, quorumPartyIndices := thresholdAccessStructure()
 	sessions := mpctest.NewMockNetwork(3)
+	partyNames := testPartyNames("ac/schnorr-mp", len(sessions))
+	access, quorumPartyIndices := thresholdAccessStructure(partyNames)
+	quorumPartyNames := mustPartyNamesFromIndices(t, partyNames, quorumPartyIndices)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 	acKeyBlobs := make([][]byte, len(sessions))
 	sidOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		acKeyBlob, sidOut, err := SchnorrMPDKGAC(ctx, sessions[idx], CurveSecp256k1, nil, access, quorumPartyIndices)
+		acKeyBlob, sidOut, err := SchnorrMPDKGAC(ctx, jobs[idx], CurveSecp256k1, nil, access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("dkg ac: %w", err)
 		}
@@ -208,12 +303,13 @@ func TestSchnorrMPACFlow(t *testing.T) {
 	xOnlyKey := requireAllEqualNonEmptyBytes(t, "schnorr mp ac x-only public key", xOnlyKeys)
 
 	signSessions := mpctest.NewMockNetwork(len(quorumPartyIndices))
+	signJobs := jobsMP(signSessions, quorumPartyNames)
 	t.Cleanup(func() { closeMockSessions(t, signSessions) })
 
 	msgHash := sha256.Sum256([]byte("schnorr-mp-ac-flow"))
 	sigs := make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := SchnorrMPSignAC(ctx, signSessions[idx], acKeyBlobs[idx], access, msgHash[:], 0)
+		sig, err := SchnorrMPSignAC(ctx, signJobs[idx], acKeyBlobs[idx], access, msgHash[:], 0)
 		if err != nil {
 			return fmt.Errorf("sign ac: %w", err)
 		}
@@ -231,7 +327,7 @@ func TestSchnorrMPACFlow(t *testing.T) {
 	refreshedKeyBlobs := make([][]byte, len(sessions))
 	refreshedSIDOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		sidOut, refreshedKeyBlob, err := SchnorrMPRefreshAC(ctx, sessions[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyIndices)
+		sidOut, refreshedKeyBlob, err := SchnorrMPRefreshAC(ctx, jobs[idx], sidOuts[idx], acKeyBlobs[idx], access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("refresh ac: %w", err)
 		}
@@ -255,7 +351,7 @@ func TestSchnorrMPACFlow(t *testing.T) {
 
 	sigs = make([][]byte, len(signSessions))
 	runPerParty(t, signSessions, func(idx int) error {
-		sig, err := SchnorrMPSignAC(ctx, signSessions[idx], refreshedKeyBlobs[idx], access, msgHash[:], 0)
+		sig, err := SchnorrMPSignAC(ctx, signJobs[idx], refreshedKeyBlobs[idx], access, msgHash[:], 0)
 		if err != nil {
 			return fmt.Errorf("sign refreshed ac: %w", err)
 		}
@@ -270,8 +366,11 @@ func TestSchnorrMPACFlow(t *testing.T) {
 
 func TestTDH2ACFlow(t *testing.T) {
 	ctx := testContext(t)
-	access, quorumPartyIndices := thresholdAccessStructure()
 	sessions := mpctest.NewMockNetwork(3)
+	partyNames := testPartyNames("ac/tdh2", len(sessions))
+	access, quorumPartyIndices := thresholdAccessStructure(partyNames)
+	quorumPartyNames := mustPartyNamesFromIndices(t, partyNames, quorumPartyIndices)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 	publicKeys := make([][]byte, len(sessions))
@@ -279,7 +378,7 @@ func TestTDH2ACFlow(t *testing.T) {
 	privateShares := make([][]byte, len(sessions))
 	sidOuts := make([][]byte, len(sessions))
 	runPerParty(t, sessions, func(idx int) error {
-		publicKey, shares, privateShare, sidOut, err := TDH2DKGAC(ctx, sessions[idx], CurveP256, nil, access, quorumPartyIndices)
+		publicKey, shares, privateShare, sidOut, err := TDH2DKGAC(ctx, jobs[idx], CurveP256, nil, access, quorumPartyNames)
 		if err != nil {
 			return fmt.Errorf("dkg ac: %w", err)
 		}
@@ -312,7 +411,7 @@ func TestTDH2ACFlow(t *testing.T) {
 		partials[i] = partial
 	}
 
-	recovered, err := TDH2CombineAC(access, publicKey, defaultPartyNames(len(sessions)), publicShareSet, label, partyNamesFromIndices(quorumPartyIndices), partials, ciphertext)
+	recovered, err := TDH2CombineAC(access, publicKey, partyNames, publicShareSet, label, quorumPartyNames, partials, ciphertext)
 	if err != nil {
 		t.Fatalf("combine ac: %v", err)
 	}
@@ -321,19 +420,22 @@ func TestTDH2ACFlow(t *testing.T) {
 	}
 }
 
-func thresholdAccessStructure() (*AccessStructure, []int) {
+func thresholdAccessStructure(partyNames []string) (*AccessStructure, []int) {
+	if len(partyNames) != 3 {
+		panic("thresholdAccessStructure requires exactly 3 party names")
+	}
 	return &AccessStructure{
 		Nodes: []AccessStructureNode{
-			{Type: AccessNodeLeaf, LeafName: "party0"},
-			{Type: AccessNodeLeaf, LeafName: "party1"},
-			{Type: AccessNodeLeaf, LeafName: "party2"},
+			{Type: AccessNodeLeaf, LeafName: partyNames[0]},
+			{Type: AccessNodeLeaf, LeafName: partyNames[1]},
+			{Type: AccessNodeLeaf, LeafName: partyNames[2]},
 			{Type: AccessNodeThreshold, ThresholdK: 2, Children: []int{0, 1, 2}},
 		},
 		Root: 3,
 	}, []int{0, 1}
 }
 
-func closeMockSessions(t *testing.T, sessions []*mpctest.MockSession) {
+func closeMockSessions(t *testing.T, sessions []*mpctest.MockTransport) {
 	t.Helper()
 	for _, session := range sessions {
 		_ = session.Close()
@@ -357,6 +459,25 @@ func requireSignatureOnlyOnReceiver(t *testing.T, label string, sigs [][]byte, r
 		}
 	}
 	return sigs[receiver]
+}
+
+func requireExtractECDSAMPShareMaterial(t *testing.T, keyBlob []byte, partyIndex int) ([]byte, []byte) {
+	t.Helper()
+	publicShare, err := ECDSAMPGetPublicShareCompressed(keyBlob)
+	if err != nil {
+		t.Fatalf("get public share for party %d: %v", partyIndex, err)
+	}
+	if len(publicShare) == 0 {
+		t.Fatalf("public share for party %d is empty", partyIndex)
+	}
+	_, privateScalar, err := ECDSAMPDetachPrivateScalar(keyBlob)
+	if err != nil {
+		t.Fatalf("detach private scalar for party %d: %v", partyIndex, err)
+	}
+	if len(privateScalar) == 0 {
+		t.Fatalf("private scalar for party %d is empty", partyIndex)
+	}
+	return publicShare, privateScalar
 }
 
 func requireAllEqualNonEmptyByteMatrices(t *testing.T, label string, values [][][]byte) [][]byte {
@@ -398,5 +519,20 @@ func requireEqualRows(t *testing.T, label string, got [][]byte, want [][]byte) {
 		if !bytes.Equal(got[i], want[i]) {
 			t.Fatalf("%s row %d mismatch: got=%x want=%x", label, i, got[i], want[i])
 		}
+	}
+}
+
+func requireValidSecp256k1ECDSASignature(t *testing.T, publicKeyCompressed []byte, msgHash []byte, sigDER []byte) {
+	t.Helper()
+	publicKey, err := secp256k1.ParsePubKey(publicKeyCompressed)
+	if err != nil {
+		t.Fatalf("failed to parse secp256k1 public key: %v", err)
+	}
+	signature, err := secp256k1ecdsa.ParseDERSignature(sigDER)
+	if err != nil {
+		t.Fatalf("failed to parse ECDSA DER signature: %v", err)
+	}
+	if !signature.Verify(msgHash, publicKey) {
+		t.Fatal("ECDSA signature verification failed")
 	}
 }

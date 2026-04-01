@@ -50,7 +50,7 @@ Security-relevant assertions in these tests include:
 
 Active negative coverage for shipped test helpers and selected failure modes:
 
-- `mpctest.MaliciousSession` behavior isolation and error messages
+- `mpctest.MaliciousTransport` behavior isolation and error messages
 - dropped-message behavior for interactive protocols with explicit timeouts
 - garbage-message injection causing at least one protocol participant to fail
 
@@ -69,12 +69,32 @@ Boundary and hardening coverage for the CGO layer:
 - fast-fail validation for MP signature receivers and AC quorum inputs
 - TDH2 AC parallel-slice contract validation
 
+### `make sanitize-go`
+
+Focused sanitizer coverage for the Go wrapper and CGO boundary:
+
+- rebuilds `cb-mpc` with ASAN/UBSAN-style compiler and linker flags
+- installs a sanitized public prefix for the wrapper to link against
+- reruns `./internal/cgo` against that sanitized build by default
+
+You can pass additional package arguments to `scripts/sanitize_go.sh` if you
+want to expand the scope beyond the default hardening package.
+
+This job is meant to catch wrapper-visible memory misuse and undefined behavior
+that can be missed by normal Go tests alone.
+
 ## How To Run
 
 Run the full wrapper test suite with the repository CGO environment:
 
 ```bash
 bash scripts/go_with_cpp.sh go test ./...
+```
+
+Run focused sanitizer coverage for the wrapper + CGO boundary:
+
+```bash
+make sanitize-go
 ```
 
 Run only the Go wrapper integration tests:
@@ -95,20 +115,23 @@ The current automated coverage does not claim:
 
 - deep cryptographic review of upstream `cb-mpc`
 - proof of constant-time behavior or side-channel resistance
+- leak detection in every environment; the sanitizer job currently favors stable
+  ASAN/UBSAN coverage for the Go+cgo boundary over always-on leak checking
 - authenticated or confidential transport from `mpctest.NewMockNetwork`
 - general Byzantine fault tolerance, collusion resistance, or replay resistance
 - production readiness of example/demo code or dev certificate scripts
 
 ## Production Assumptions
 
-The wrapper assumes that production callers provide their own `Session`
+The wrapper assumes that production callers provide their own `Transport`
 implementation with:
 
 - authenticated transport
 - confidential transport
+- stable globally unique party names in every interactive `Job2P` / `JobMP`
 - reasonable message-size limits
 - timeout/cancellation handling for stalled or malicious peers
 
-`mpctest.NewMockNetwork`, `mpctest.MaliciousSession`, and the example/demo
+`mpctest.NewMockNetwork`, `mpctest.MaliciousTransport`, and the example/demo
 transports exist to test or demonstrate integration behavior. They are not
 drop-in production transports.

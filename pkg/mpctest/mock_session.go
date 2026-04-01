@@ -8,20 +8,20 @@ import (
 	"sync"
 )
 
-// MockSession provides an in-memory session implementation for tests and local
+// MockTransport provides an in-memory transport implementation for tests and local
 // demos. It intentionally provides no authentication or confidentiality.
-type MockSession struct {
+type MockTransport struct {
 	myIndex int
-	others  []*MockSession
+	others  []*MockTransport
 	mutex   sync.Mutex
 	cond    *sync.Cond
 	queues  []list.List
 	closed  bool
 }
 
-// NewMockSession creates a new MockSession for the specified party index.
-func NewMockSession(myIndex int) *MockSession {
-	s := &MockSession{
+// NewMockTransport creates a new MockTransport for the specified party index.
+func NewMockTransport(myIndex int) *MockTransport {
+	s := &MockTransport{
 		myIndex: myIndex,
 		closed:  false,
 	}
@@ -31,13 +31,13 @@ func NewMockSession(myIndex int) *MockSession {
 
 // setOthers configures connections to other parties.
 // This is called by NewMockNetwork to wire up all parties.
-func (s *MockSession) setOthers(sessions []*MockSession) {
+func (s *MockTransport) setOthers(sessions []*MockTransport) {
 	s.others = sessions
 	s.queues = make([]list.List, len(sessions))
 }
 
 // Send sends a message to the specified party.
-func (s *MockSession) Send(_ context.Context, toParty int, msg []byte) error {
+func (s *MockTransport) Send(_ context.Context, toParty int, msg []byte) error {
 	if toParty == s.myIndex {
 		return errors.New("cannot send to self")
 	}
@@ -58,7 +58,7 @@ func (s *MockSession) Send(_ context.Context, toParty int, msg []byte) error {
 }
 
 // Receive receives a message from the specified party (blocking).
-func (s *MockSession) Receive(ctx context.Context, fromParty int) ([]byte, error) {
+func (s *MockTransport) Receive(ctx context.Context, fromParty int) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -103,7 +103,7 @@ func (s *MockSession) Receive(ctx context.Context, fromParty int) ([]byte, error
 }
 
 // ReceiveAll receives messages from multiple parties concurrently.
-func (s *MockSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
+func (s *MockTransport) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
 	n := len(fromParties)
 	messages := make([][]byte, n)
 	errs := make([]error, n)
@@ -133,17 +133,17 @@ func (s *MockSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]by
 }
 
 // MyIndex returns this party's index.
-func (s *MockSession) MyIndex() int {
+func (s *MockTransport) MyIndex() int {
 	return s.myIndex
 }
 
 // PartyCount returns the total number of parties.
-func (s *MockSession) PartyCount() int {
+func (s *MockTransport) PartyCount() int {
 	return len(s.others)
 }
 
 // Close closes the session and unblocks any waiting receives.
-func (s *MockSession) Close() error {
+func (s *MockTransport) Close() error {
 	s.mutex.Lock()
 	s.closed = true
 	s.mutex.Unlock()
@@ -152,11 +152,11 @@ func (s *MockSession) Close() error {
 }
 
 // NewMockNetwork creates a complete mock network for tests and local demos.
-// It returns a slice of MockSession instances, one for each party.
-func NewMockNetwork(nParties int) []*MockSession {
-	sessions := make([]*MockSession, nParties)
+// It returns a slice of MockTransport instances, one for each party.
+func NewMockNetwork(nParties int) []*MockTransport {
+	sessions := make([]*MockTransport, nParties)
 	for i := 0; i < nParties; i++ {
-		sessions[i] = NewMockSession(i)
+		sessions[i] = NewMockTransport(i)
 	}
 	for i := 0; i < nParties; i++ {
 		sessions[i].setOthers(sessions)

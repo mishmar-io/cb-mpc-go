@@ -23,3 +23,27 @@ func SplitHostPort(addr string) (string, int, error) {
 func JoinHostPort(host string, port int) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
+
+// OffsetAddresses applies a fixed port offset to each host:port address.
+func OffsetAddresses(addrs []string, offset int) ([]string, error) {
+	out := make([]string, len(addrs))
+	for i, addr := range addrs {
+		host, port, err := SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("address %q: %w", addr, err)
+		}
+		out[i] = JoinHostPort(host, port+offset)
+	}
+	return out, nil
+}
+
+// OtherPartyIndices returns all party indices except self.
+func OtherPartyIndices(self, partyCount int) []int {
+	indices := make([]int, 0, partyCount-1)
+	for i := 0; i < partyCount; i++ {
+		if i != self {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}

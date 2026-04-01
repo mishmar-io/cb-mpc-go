@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CERT_DIR="${1:-"$ROOT_DIR/demos/tmp/certs/eddsa_mp_backup_mtls"}"
 PARTY_ADDRS="${2:-auto}"
+PEER_CERT_DIRS=("$CERT_DIR/peer-alpha" "$CERT_DIR/peer-bravo" "$CERT_DIR/peer-charlie")
 
 if [[ "$PARTY_ADDRS" == "auto" ]]; then
   PARTY_ADDRS="$(python3 - <<'PY'
@@ -59,8 +60,8 @@ launch_party() {
     --listen "$listen_addr" \
     --party-addrs "$PARTY_ADDRS" \
     --ca "$CERT_DIR/ca.pem" \
-    --cert "$CERT_DIR/party-$self/cert.pem" \
-    --key "$CERT_DIR/party-$self/key.pem" \
+    --cert "${PEER_CERT_DIRS[$self]}/cert.pem" \
+    --key "${PEER_CERT_DIRS[$self]}/key.pem" \
     >"$log_file" 2>&1 &
   LAST_PID=$!
 }
@@ -74,20 +75,20 @@ sleep 1
 launch_party 2 "$PARTY2_ADDR" "$PARTY2_LOG"
 PARTY2_PID=$LAST_PID
 
-party0_status=0
-party1_status=0
-party2_status=0
-wait "$PARTY0_PID" || party0_status=$?
-wait "$PARTY1_PID" || party1_status=$?
-wait "$PARTY2_PID" || party2_status=$?
+alpha_status=0
+bravo_status=0
+charlie_status=0
+wait "$PARTY0_PID" || alpha_status=$?
+wait "$PARTY1_PID" || bravo_status=$?
+wait "$PARTY2_PID" || charlie_status=$?
 
-echo "--- party 0 ---"
+echo "--- self 0 / peer alpha ---"
 cat "$PARTY0_LOG"
-echo "--- party 1 ---"
+echo "--- self 1 / peer bravo ---"
 cat "$PARTY1_LOG"
-echo "--- party 2 ---"
+echo "--- self 2 / peer charlie ---"
 cat "$PARTY2_LOG"
 
-if [[ $party0_status -ne 0 || $party1_status -ne 0 || $party2_status -ne 0 ]]; then
+if [[ $alpha_status -ne 0 || $bravo_status -ne 0 || $charlie_status -ne 0 ]]; then
   exit 1
 fi

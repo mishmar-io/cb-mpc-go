@@ -57,13 +57,11 @@ import (
 	"unsafe"
 )
 
-// Session is the transport contract required by cb-mpc interactive protocols.
-type Session interface {
+// Transport is the network contract required by cb-mpc interactive protocols.
+type Transport interface {
 	Send(ctx context.Context, toParty int, msg []byte) error
 	Receive(ctx context.Context, fromParty int) ([]byte, error)
 	ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error)
-	MyIndex() int
-	PartyCount() int
 }
 
 // CurveID matches cbmpc_curve_id_t.
@@ -82,6 +80,21 @@ const (
 	TwoPartyP1 TwoPartySelf = TwoPartySelf(C.CBMPC_2PC_P1)
 	TwoPartyP2 TwoPartySelf = TwoPartySelf(C.CBMPC_2PC_P2)
 )
+
+// Job2P is the explicit 2-party execution context passed to cb-mpc.
+type Job2P struct {
+	Self      TwoPartySelf
+	P1Name    string
+	P2Name    string
+	Transport Transport
+}
+
+// JobMP is the explicit multi-party execution context passed to cb-mpc.
+type JobMP struct {
+	Self       int
+	PartyNames []string
+	Transport  Transport
+}
 
 // AccessStructureNodeType matches cbmpc_access_structure_node_type_t.
 type AccessStructureNodeType int32
@@ -129,16 +142,16 @@ type PVEBaseKEMCallbacks struct {
 	Decap func(dk, kemCT []byte) ([]byte, error)
 }
 
-type sessionContext struct {
-	ctx     context.Context
-	session Session
+type transportContext struct {
+	ctx       context.Context
+	transport Transport
 
 	mu               sync.Mutex
 	lastTransportErr error
 }
 
 var (
-	sessionMap sync.Map
+	transportMap sync.Map
 
 	pveBasePKEMap          sync.Map
 	pveRSAOAEPHSMDecapMap  sync.Map
@@ -146,43 +159,43 @@ var (
 	pveBaseKEMMap          sync.Map
 )
 
-func registerSession(ctx context.Context, session Session) (unsafe.Pointer, *sessionContext, error) {
-	if session == nil {
-		return nil, nil, fmt.Errorf("session cannot be nil")
+func registerTransport(ctx context.Context, transport Transport) (unsafe.Pointer, *transportContext, error) {
+	if transport == nil {
+		return nil, nil, fmt.Errorf("transport cannot be nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ptr := C.malloc(1)
 	if ptr == nil {
-		return nil, nil, fmt.Errorf("failed to allocate session context")
+		return nil, nil, fmt.Errorf("failed to allocate transport context")
 	}
-	sc := &sessionContext{
-		ctx:     ctx,
-		session: session,
+	tc := &transportContext{
+		ctx:       ctx,
+		transport: transport,
 	}
-	sessionMap.Store(ptr, sc)
-	return ptr, sc, nil
+	transportMap.Store(ptr, tc)
+	return ptr, tc, nil
 }
 
-func unregisterSession(ptr unsafe.Pointer) {
+func unregisterTransport(ptr unsafe.Pointer) {
 	if ptr == nil {
 		return
 	}
-	sessionMap.Delete(ptr)
+	transportMap.Delete(ptr)
 	C.free(ptr)
 }
 
-func getSession(ptr unsafe.Pointer) (*sessionContext, bool) {
-	value, ok := sessionMap.Load(ptr)
+func getTransport(ptr unsafe.Pointer) (*transportContext, bool) {
+	value, ok := transportMap.Load(ptr)
 	if !ok {
 		return nil, false
 	}
-	sc, ok := value.(*sessionContext)
-	return sc, ok
+	tc, ok := value.(*transportContext)
+	return tc, ok
 }
 
-var ErrTransportSessionClosed = errors.New("cgo: transport session closed")
+var ErrTransportClosed = errors.New("cgo: transport closed")
 
 type TransportError struct {
 	Status error
@@ -217,23 +230,26 @@ func normalizeTransportErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, net.ErrClosed) || strings.Contains(strings.ToLower(err.Error()), "session closed") {
-		return ErrTransportSessionClosed
+	errText := strings.ToLower(err.Error())
+	if errors.Is(err, net.ErrClosed) ||
+		strings.Contains(errText, "session closed") ||
+		strings.Contains(errText, "transport closed") {
+		return ErrTransportClosed
 	}
 	return err
 }
 
-func (sc *sessionContext) storeTransportErr(err error) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.lastTransportErr = normalizeTransportErr(err)
+func (tc *transportContext) storeTransportErr(err error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.lastTransportErr = normalizeTransportErr(err)
 }
 
-func (sc *sessionContext) takeTransportErr() error {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	err := sc.lastTransportErr
-	sc.lastTransportErr = nil
+func (tc *transportContext) takeTransportErr() error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	err := tc.lastTransportErr
+	tc.lastTransportErr = nil
 	return err
 }
 
@@ -717,32 +733,23 @@ func freeCStringArray(arrayPtr unsafe.Pointer, cStrings []*C.char) {
 	}
 }
 
-func with2PCJob(ctx context.Context, session Session, self TwoPartySelf, p1Name, p2Name string, fn func(*C.cbmpc_2pc_job_t) error) error {
-	if session == nil {
-		return fmt.Errorf("session cannot be nil")
-	}
-	if self != TwoPartyP1 && self != TwoPartyP2 {
-		return fmt.Errorf("invalid two-party self index %d", self)
-	}
-	if p1Name == "" || p2Name == "" {
-		return fmt.Errorf("party names cannot be empty")
-	}
-	if strings.IndexByte(p1Name, 0) != -1 || strings.IndexByte(p2Name, 0) != -1 {
-		return fmt.Errorf("party names cannot contain NUL bytes")
+func with2PCJob(ctx context.Context, job Job2P, fn func(*C.cbmpc_2pc_job_t) error) error {
+	if err := validateJob2P(job); err != nil {
+		return err
 	}
 
-	ctxPtr, sc, err := registerSession(ctx, session)
+	ctxPtr, tc, err := registerTransport(ctx, job.Transport)
 	if err != nil {
 		return err
 	}
-	defer unregisterSession(ctxPtr)
+	defer unregisterTransport(ctxPtr)
 
-	cP1Name := C.CString(p1Name)
+	cP1Name := C.CString(job.P1Name)
 	if cP1Name == nil {
 		return fmt.Errorf("failed to allocate C string for p1Name")
 	}
 	defer C.free(unsafe.Pointer(cP1Name))
-	cP2Name := C.CString(p2Name)
+	cP2Name := C.CString(job.P2Name)
 	if cP2Name == nil {
 		return fmt.Errorf("failed to allocate C string for p2Name")
 	}
@@ -769,7 +776,7 @@ func with2PCJob(ctx context.Context, session Session, self TwoPartySelf, p1Name,
 	defer C.free(unsafe.Pointer(jobPtr))
 
 	*jobPtr = C.cbmpc_2pc_job_t{
-		self:      C.cbmpc_2pc_party_t(self),
+		self:      C.cbmpc_2pc_party_t(job.Self),
 		p1_name:   cP1Name,
 		p2_name:   cP2Name,
 		transport: transportPtr,
@@ -777,36 +784,27 @@ func with2PCJob(ctx context.Context, session Session, self TwoPartySelf, p1Name,
 
 	err = fn(jobPtr)
 	if err != nil {
-		if cause := sc.takeTransportErr(); cause != nil {
+		if cause := tc.takeTransportErr(); cause != nil {
 			return &TransportError{Status: err, Cause: cause}
 		}
 		return err
 	}
-	_ = sc.takeTransportErr()
+	_ = tc.takeTransportErr()
 	return nil
 }
 
-func withMPJob(ctx context.Context, session Session, self int, partyNames []string, fn func(*C.cbmpc_mp_job_t) error) error {
-	if session == nil {
-		return fmt.Errorf("session cannot be nil")
-	}
-	if len(partyNames) == 0 {
-		return fmt.Errorf("partyNames cannot be empty (invalid party count or names)")
-	}
-	if len(partyNames) > math.MaxInt32 {
-		return fmt.Errorf("too many partyNames: %d", len(partyNames))
-	}
-	if self < 0 || self >= len(partyNames) {
-		return fmt.Errorf("self index %d out of range [0, %d)", self, len(partyNames))
+func withMPJob(ctx context.Context, job JobMP, fn func(*C.cbmpc_mp_job_t) error) error {
+	if err := validateJobMP(job); err != nil {
+		return err
 	}
 
-	ctxPtr, sc, err := registerSession(ctx, session)
+	ctxPtr, tc, err := registerTransport(ctx, job.Transport)
 	if err != nil {
 		return err
 	}
-	defer unregisterSession(ctxPtr)
+	defer unregisterTransport(ctxPtr)
 
-	namesArray, cNames, err := createCStringArray(partyNames)
+	namesArray, cNames, err := createCStringArray(job.PartyNames)
 	if err != nil {
 		return err
 	}
@@ -833,20 +831,20 @@ func withMPJob(ctx context.Context, session Session, self int, partyNames []stri
 	defer C.free(unsafe.Pointer(jobPtr))
 
 	*jobPtr = C.cbmpc_mp_job_t{
-		self:              C.int32_t(self),
+		self:              C.int32_t(job.Self),
 		party_names:       (**C.char)(namesArray),
-		party_names_count: C.int(len(partyNames)),
+		party_names_count: C.int(len(job.PartyNames)),
 		transport:         transportPtr,
 	}
 
 	err = fn(jobPtr)
 	if err != nil {
-		if cause := sc.takeTransportErr(); cause != nil {
+		if cause := tc.takeTransportErr(); cause != nil {
 			return &TransportError{Status: err, Cause: cause}
 		}
 		return err
 	}
-	_ = sc.takeTransportErr()
+	_ = tc.takeTransportErr()
 	return nil
 }
 
@@ -1050,32 +1048,6 @@ func (compiled *compiledAccessStructure) free() {
 	}
 }
 
-func default2PNames() (string, string) {
-	return "party0", "party1"
-}
-
-func DefaultPartyNames(count int) []string {
-	if count < 0 {
-		return nil
-	}
-	if count > math.MaxInt32 {
-		return nil
-	}
-	out := make([]string, count)
-	for i := 0; i < count; i++ {
-		out[i] = fmt.Sprintf("party%d", i)
-	}
-	return out
-}
-
-func PartyNamesFromIndices(indices []int) []string {
-	out := make([]string, len(indices))
-	for i, index := range indices {
-		out[i] = fmt.Sprintf("party%d", index)
-	}
-	return out
-}
-
 const (
 	maxTransportMessageSize         = 64 * 1024 * 1024  // 64 MiB per message
 	maxTransportReceiveAllTotalSize = 256 * 1024 * 1024 // 256 MiB across all messages
@@ -1096,6 +1068,14 @@ func zeroCmemsOutput(out *C.cmems_t) {
 	out.count = 0
 	out.data = nil
 	out.sizes = nil
+}
+
+func freeOwnedCallbackAlloc(ptr *unsafe.Pointer) {
+	if ptr == nil || *ptr == nil {
+		return
+	}
+	C.cbmpc_free(*ptr)
+	*ptr = nil
 }
 
 func freeAndZeroCmemOutput(out *C.cmem_t) {
@@ -1126,6 +1106,11 @@ const (
 	testCBMPCERange      = int32(C.CBMPC_E_RANGE)
 )
 
+var (
+	testHookAfterTransportReceiveAlloc    func()
+	testHookAfterTransportReceiveAllAlloc func()
+)
+
 func setOwnedCmemOutput(out *C.cmem_t, data []byte) C.cbmpc_error_t {
 	if out == nil {
 		return C.CBMPC_E_BADARG
@@ -1152,6 +1137,106 @@ func validatePartyCount(partyCount int) error {
 		return fmt.Errorf("party count %d out of supported range [0, %d]", partyCount, math.MaxInt32)
 	}
 	return nil
+}
+
+func validatePartyName(name string, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s cannot be empty", name)
+	}
+	if strings.IndexByte(value, 0) != -1 {
+		return fmt.Errorf("%s cannot contain NUL bytes", name)
+	}
+	if isSequentialPartyLabel(value) {
+		return fmt.Errorf("%s=%q uses a placeholder label; use a stable globally unique identifier such as a public key fingerprint or UUID", name, value)
+	}
+	if net.ParseIP(value) != nil {
+		return fmt.Errorf("%s=%q must not be a bare IP address; use a stable globally unique identifier such as a public key fingerprint or UUID", name, value)
+	}
+	if host, port, err := net.SplitHostPort(value); err == nil && host != "" && port != "" {
+		return fmt.Errorf("%s=%q must not be a host:port endpoint; use a stable globally unique identifier such as a public key fingerprint or UUID", name, value)
+	}
+	return nil
+}
+
+func isSequentialPartyLabel(value string) bool {
+	lower := strings.ToLower(value)
+	if !strings.HasPrefix(lower, "party") || len(lower) == len("party") {
+		return false
+	}
+	for _, ch := range lower[len("party"):] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validateDistinctPartyNames(name string, partyNames []string) error {
+	seen := make(map[string]struct{}, len(partyNames))
+	for i, partyName := range partyNames {
+		if err := validatePartyName(fmt.Sprintf("%s[%d]", name, i), partyName); err != nil {
+			return err
+		}
+		if _, ok := seen[partyName]; ok {
+			return fmt.Errorf("%s[%d]=%q duplicates another party name", name, i, partyName)
+		}
+		seen[partyName] = struct{}{}
+	}
+	return nil
+}
+
+func validatePartyNameSubset(name string, subset []string, roster []string) error {
+	if err := validateDistinctPartyNames(name, subset); err != nil {
+		return err
+	}
+	rosterSet := make(map[string]struct{}, len(roster))
+	for _, partyName := range roster {
+		rosterSet[partyName] = struct{}{}
+	}
+	for i, partyName := range subset {
+		if _, ok := rosterSet[partyName]; !ok {
+			return fmt.Errorf("%s[%d]=%q is not present in job.PartyNames", name, i, partyName)
+		}
+	}
+	return nil
+}
+
+func validateJob2P(job Job2P) error {
+	if job.Transport == nil {
+		return fmt.Errorf("job transport cannot be nil")
+	}
+	if job.Self != TwoPartyP1 && job.Self != TwoPartyP2 {
+		return fmt.Errorf("invalid two-party self index %d", job.Self)
+	}
+	if err := validatePartyName("job.P1Name", job.P1Name); err != nil {
+		return err
+	}
+	if err := validatePartyName("job.P2Name", job.P2Name); err != nil {
+		return err
+	}
+	if job.P1Name == job.P2Name {
+		return fmt.Errorf("job.P1Name and job.P2Name must be distinct")
+	}
+	return nil
+}
+
+func validateJobMP(job JobMP) error {
+	if job.Transport == nil {
+		return fmt.Errorf("job transport cannot be nil")
+	}
+	if err := validatePartyCount(len(job.PartyNames)); err != nil {
+		return err
+	}
+	if len(job.PartyNames) < 2 {
+		return fmt.Errorf("job.PartyNames must contain at least 2 entries, got %d", len(job.PartyNames))
+	}
+	if len(job.PartyNames) > 64 {
+		return fmt.Errorf("job.PartyNames exceeds maximum size 64: got %d", len(job.PartyNames))
+	}
+	if err := validatePartyIndex("job.Self", job.Self, len(job.PartyNames)); err != nil {
+		return err
+	}
+	return validateDistinctPartyNames("job.PartyNames", job.PartyNames)
 }
 
 func validatePartyIndex(name string, idx int, partyCount int) error {
@@ -1200,6 +1285,26 @@ func testGoTransportReceiveResult(ctx unsafe.Pointer) (int32, bool) {
 func testGoTransportReceiveAllResult(ctx unsafe.Pointer) (int32, bool) {
 	var out C.cmems_t
 	code := goTransportReceiveAll(ctx, nil, 0, &out)
+	zeroed := out.count == 0 && out.data == nil && out.sizes == nil
+	if out.data != nil {
+		C.cbmpc_free(unsafe.Pointer(out.data))
+	}
+	if out.sizes != nil {
+		C.cbmpc_free(unsafe.Pointer(out.sizes))
+	}
+	return int32(code), zeroed
+}
+
+func testGoTransportReceiveAllWithSendersResult(ctx unsafe.Pointer, senders []int32) (int32, bool) {
+	var out C.cmems_t
+	if len(senders) == 0 {
+		return testGoTransportReceiveAllResult(ctx)
+	}
+	cSenders := make([]C.int32_t, len(senders))
+	for i, sender := range senders {
+		cSenders[i] = C.int32_t(sender)
+	}
+	code := goTransportReceiveAll(ctx, &cSenders[0], C.int(len(cSenders)), &out)
 	zeroed := out.count == 0 && out.data == nil && out.sizes == nil
 	if out.data != nil {
 		C.cbmpc_free(unsafe.Pointer(out.data))
@@ -1272,7 +1377,7 @@ func goTransportSend(ctx unsafe.Pointer, receiver C.int32_t, data *C.uint8_t, si
 	if size > C.int(maxTransportMessageSize) {
 		return C.CBMPC_E_RANGE
 	}
-	sc, ok := getSession(ctx)
+	tc, ok := getTransport(ctx)
 	if !ok {
 		return C.CBMPC_E_BADARG
 	}
@@ -1284,8 +1389,8 @@ func goTransportSend(ctx unsafe.Pointer, receiver C.int32_t, data *C.uint8_t, si
 	if size > 0 {
 		message = C.GoBytes(unsafe.Pointer(data), size)
 	}
-	if err := sc.session.Send(sc.ctx, int(receiver), message); err != nil {
-		sc.storeTransportErr(err)
+	if err := tc.transport.Send(tc.ctx, int(receiver), message); err != nil {
+		tc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	return C.CBMPC_SUCCESS
@@ -1294,7 +1399,9 @@ func goTransportSend(ctx unsafe.Pointer, receiver C.int32_t, data *C.uint8_t, si
 //export goTransportReceive
 func goTransportReceive(ctx unsafe.Pointer, sender C.int32_t, outMsg *C.cmem_t) (code C.cbmpc_error_t) {
 	code = C.CBMPC_SUCCESS
+	var buffer unsafe.Pointer
 	defer recoverCallbackPanic(&code, C.CBMPC_E_NET_GENERAL, func() {
+		freeOwnedCallbackAlloc(&buffer)
 		zeroCmemOutput(outMsg)
 	})
 
@@ -1303,14 +1410,14 @@ func goTransportReceive(ctx unsafe.Pointer, sender C.int32_t, outMsg *C.cmem_t) 
 	}
 	zeroCmemOutput(outMsg)
 
-	sc, ok := getSession(ctx)
+	tc, ok := getTransport(ctx)
 	if !ok {
 		return C.CBMPC_E_BADARG
 	}
 
-	message, err := sc.session.Receive(sc.ctx, int(sender))
+	message, err := tc.transport.Receive(tc.ctx, int(sender))
 	if err != nil {
-		sc.storeTransportErr(err)
+		tc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	if len(message) > maxTransportMessageSize || len(message) > math.MaxInt32 {
@@ -1320,9 +1427,12 @@ func goTransportReceive(ctx unsafe.Pointer, sender C.int32_t, outMsg *C.cmem_t) 
 		return C.CBMPC_SUCCESS
 	}
 
-	buffer := C.cbmpc_malloc(C.size_t(len(message)))
+	buffer = C.cbmpc_malloc(C.size_t(len(message)))
 	if buffer == nil {
 		return C.CBMPC_E_INSUFFICIENT
+	}
+	if testHookAfterTransportReceiveAlloc != nil {
+		testHookAfterTransportReceiveAlloc()
 	}
 
 	copy(unsafe.Slice((*byte)(buffer), len(message)), message)
@@ -1334,7 +1444,11 @@ func goTransportReceive(ctx unsafe.Pointer, sender C.int32_t, outMsg *C.cmem_t) 
 //export goTransportReceiveAll
 func goTransportReceiveAll(ctx unsafe.Pointer, senders *C.int32_t, sendersCount C.int, outMsgs *C.cmems_t) (code C.cbmpc_error_t) {
 	code = C.CBMPC_SUCCESS
+	var sizesPtr unsafe.Pointer
+	var dataPtr unsafe.Pointer
 	defer recoverCallbackPanic(&code, C.CBMPC_E_NET_GENERAL, func() {
+		freeOwnedCallbackAlloc(&dataPtr)
+		freeOwnedCallbackAlloc(&sizesPtr)
 		zeroCmemsOutput(outMsgs)
 	})
 
@@ -1350,7 +1464,7 @@ func goTransportReceiveAll(ctx unsafe.Pointer, senders *C.int32_t, sendersCount 
 		return C.CBMPC_E_BADARG
 	}
 
-	sc, ok := getSession(ctx)
+	tc, ok := getTransport(ctx)
 	if !ok {
 		return C.CBMPC_E_BADARG
 	}
@@ -1364,9 +1478,9 @@ func goTransportReceiveAll(ctx unsafe.Pointer, senders *C.int32_t, sendersCount 
 		}
 	}
 
-	messages, err := sc.session.ReceiveAll(sc.ctx, goSenders)
+	messages, err := tc.transport.ReceiveAll(tc.ctx, goSenders)
 	if err != nil {
-		sc.storeTransportErr(err)
+		tc.storeTransportErr(err)
 		return C.CBMPC_E_NET_GENERAL
 	}
 	if len(messages) != count {
@@ -1391,18 +1505,20 @@ func goTransportReceiveAll(ctx unsafe.Pointer, senders *C.int32_t, sendersCount 
 		return C.CBMPC_E_RANGE
 	}
 
-	sizesPtr := C.cbmpc_malloc(C.size_t(count) * C.size_t(C.sizeof_int))
+	sizesPtr = C.cbmpc_malloc(C.size_t(count) * C.size_t(C.sizeof_int))
 	if sizesPtr == nil {
 		return C.CBMPC_E_INSUFFICIENT
 	}
 
-	var dataPtr unsafe.Pointer
 	if total > 0 {
 		dataPtr = C.cbmpc_malloc(C.size_t(total))
 		if dataPtr == nil {
 			C.cbmpc_free(sizesPtr)
 			return C.CBMPC_E_INSUFFICIENT
 		}
+	}
+	if testHookAfterTransportReceiveAllAlloc != nil {
+		testHookAfterTransportReceiveAllAlloc()
 	}
 
 	sizes := unsafe.Slice((*C.int)(unsafe.Pointer(sizesPtr)), count)
@@ -1582,42 +1698,14 @@ func goPVEKEMDecap(ctx unsafe.Pointer, dk C.cmem_t, kemCT C.cmem_t, outKemSS *C.
 	return setOwnedCmemOutput(outKemSS, kemSS)
 }
 
-func default2PSelf(self int) (TwoPartySelf, error) {
-	switch self {
-	case 0:
-		return TwoPartyP1, nil
-	case 1:
-		return TwoPartyP2, nil
-	default:
-		return 0, fmt.Errorf("two-party self index must be 0 or 1, got %d", self)
-	}
-}
-
-func withDefault2PCJob(ctx context.Context, session Session, fn func(self TwoPartySelf, p1Name, p2Name string) error) error {
-	if session == nil {
-		return fmt.Errorf("session cannot be nil")
-	}
-	if session.PartyCount() != 2 {
-		return fmt.Errorf("session must have exactly 2 parties, got %d", session.PartyCount())
-	}
-	self, err := default2PSelf(session.MyIndex())
-	if err != nil {
-		return err
-	}
-	p1Name, p2Name := default2PNames()
-	return fn(self, p1Name, p2Name)
-}
-
 // -------------------------------
 // ECDSA-2PC
 // -------------------------------
 
-func ECDSA2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, error) {
+func ECDSA2PDKG(ctx context.Context, job Job2P, curve CurveID) ([]byte, error) {
 	var outKeyBlob C.cmem_t
-	err := withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_ecdsa_2p_dkg", C.cbmpc_ecdsa_2p_dkg(job, C.cbmpc_curve_id_t(curve), &outKeyBlob))
-		})
+	err := with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_ecdsa_2p_dkg", C.cbmpc_ecdsa_2p_dkg(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -1626,17 +1714,15 @@ func ECDSA2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, er
 	return cmemToBytesAndFree(outKeyBlob), nil
 }
 
-func ECDSA2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byte, error) {
+func ECDSA2PRefresh(ctx context.Context, job Job2P, keyBlob []byte) ([]byte, error) {
 	var outNewKeyBlob C.cmem_t
 	keyBlobMem, keyBlobCleanup, err := bytesToOwnedCmem(keyBlob)
 	if err != nil {
 		return nil, err
 	}
 	defer keyBlobCleanup()
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_ecdsa_2p_refresh", C.cbmpc_ecdsa_2p_refresh(job, keyBlobMem, &outNewKeyBlob))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_ecdsa_2p_refresh", C.cbmpc_ecdsa_2p_refresh(jobPtr, keyBlobMem, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outNewKeyBlob)
@@ -1645,7 +1731,7 @@ func ECDSA2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byt
 	return cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func ECDSA2PSign(ctx context.Context, session Session, keyBlob []byte, msgHash []byte, sidIn []byte) ([]byte, []byte, error) {
+func ECDSA2PSign(ctx context.Context, job Job2P, keyBlob []byte, msgHash []byte, sidIn []byte) ([]byte, []byte, error) {
 	var sidOut C.cmem_t
 	var sigOut C.cmem_t
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msgHash, sidIn)
@@ -1657,10 +1743,8 @@ func ECDSA2PSign(ctx context.Context, session Session, keyBlob []byte, msgHash [
 	msgHashMem := mems[1]
 	sidInMem := mems[2]
 
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_ecdsa_2p_sign", C.cbmpc_ecdsa_2p_sign(job, keyBlobMem, msgHashMem, sidInMem, &sidOut, &sigOut))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_ecdsa_2p_sign", C.cbmpc_ecdsa_2p_sign(jobPtr, keyBlobMem, msgHashMem, sidInMem, &sidOut, &sigOut))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -1736,12 +1820,11 @@ func ECDSA2PAttachPrivateScalar(publicKeyBlob []byte, privateScalar []byte, publ
 // ECDSA-MP
 // -------------------------------
 
-func ECDSAMPDKGAdditive(ctx context.Context, session Session, curve CurveID) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func ECDSAMPDKGAdditive(ctx context.Context, job JobMP, curve CurveID) ([]byte, []byte, error) {
 	var outKeyBlob C.cmem_t
 	var outSID C.cmem_t
-	err := withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_dkg_additive", C.cbmpc_ecdsa_mp_dkg_additive(job, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
+	err := withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_dkg_additive", C.cbmpc_ecdsa_mp_dkg_additive(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -1751,20 +1834,20 @@ func ECDSAMPDKGAdditive(ctx context.Context, session Session, curve CurveID) ([]
 	return cmemToBytesAndFree(outKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func ECDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func ECDSAMPDKGAC(ctx context.Context, job JobMP, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1777,8 +1860,8 @@ func ECDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []b
 		return nil, nil, err
 	}
 	defer sidInCleanup()
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_dkg_ac", C.cbmpc_ecdsa_mp_dkg_ac(job, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &outACKeyBlob, &outSID))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_dkg_ac", C.cbmpc_ecdsa_mp_dkg_ac(jobPtr, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &outACKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outACKeyBlob)
@@ -1788,8 +1871,7 @@ func ECDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []b
 	return cmemToBytesAndFree(outACKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func ECDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func ECDSAMPRefreshAdditive(ctx context.Context, job JobMP, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
 	mems, cleanup, err := bytesToOwnedCmems(sidIn, keyBlob)
 	if err != nil {
 		return nil, nil, err
@@ -1800,8 +1882,8 @@ func ECDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, 
 	var sidOut C.cmem_t
 	var outNewKeyBlob C.cmem_t
 
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_refresh_additive", C.cbmpc_ecdsa_mp_refresh_additive(job, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_refresh_additive", C.cbmpc_ecdsa_mp_refresh_additive(jobPtr, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -1811,20 +1893,20 @@ func ECDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, 
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func ECDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func ECDSAMPRefreshAC(ctx context.Context, job JobMP, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1839,8 +1921,8 @@ func ECDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyB
 	acKeyBlobMem := mems[1]
 	var sidOut C.cmem_t
 	var outNewACKeyBlob C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_refresh_ac", C.cbmpc_ecdsa_mp_refresh_ac(job, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &sidOut, &outNewACKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_refresh_ac", C.cbmpc_ecdsa_mp_refresh_ac(jobPtr, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &sidOut, &outNewACKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -1850,12 +1932,13 @@ func ECDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyB
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewACKeyBlob), nil
 }
 
-func ECDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, msgHash []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func ECDSAMPSignAdditive(ctx context.Context, job JobMP, keyBlob []byte, msgHash []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msgHash)
 	if err != nil {
 		return nil, err
@@ -1864,8 +1947,8 @@ func ECDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, m
 	keyBlobMem := mems[0]
 	msgHashMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_sign_additive", C.cbmpc_ecdsa_mp_sign_additive(job, keyBlobMem, msgHashMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_sign_additive", C.cbmpc_ecdsa_mp_sign_additive(jobPtr, keyBlobMem, msgHashMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -1874,12 +1957,13 @@ func ECDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, m
 	return cmemToBytesAndFree(sigOut), nil
 }
 
-func ECDSAMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, access *AccessStructure, msgHash []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func ECDSAMPSignAC(ctx context.Context, job JobMP, acKeyBlob []byte, access *AccessStructure, msgHash []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, err
@@ -1894,8 +1978,8 @@ func ECDSAMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, acces
 	acKeyBlobMem := mems[0]
 	msgHashMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_ecdsa_mp_sign_ac", C.cbmpc_ecdsa_mp_sign_ac(job, acKeyBlobMem, &compiledAccess.cStruct, msgHashMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_ecdsa_mp_sign_ac", C.cbmpc_ecdsa_mp_sign_ac(jobPtr, acKeyBlobMem, &compiledAccess.cStruct, msgHashMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -1969,12 +2053,10 @@ func ECDSAMPAttachPrivateScalar(publicKeyBlob []byte, privateScalarFixed []byte,
 // EdDSA-2PC
 // -------------------------------
 
-func EdDSA2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, error) {
+func EdDSA2PDKG(ctx context.Context, job Job2P, curve CurveID) ([]byte, error) {
 	var outKeyBlob C.cmem_t
-	err := withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_eddsa_2p_dkg", C.cbmpc_eddsa_2p_dkg(job, C.cbmpc_curve_id_t(curve), &outKeyBlob))
-		})
+	err := with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_eddsa_2p_dkg", C.cbmpc_eddsa_2p_dkg(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -1983,17 +2065,15 @@ func EdDSA2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, er
 	return cmemToBytesAndFree(outKeyBlob), nil
 }
 
-func EdDSA2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byte, error) {
+func EdDSA2PRefresh(ctx context.Context, job Job2P, keyBlob []byte) ([]byte, error) {
 	var outNewKeyBlob C.cmem_t
 	keyBlobMem, keyBlobCleanup, err := bytesToOwnedCmem(keyBlob)
 	if err != nil {
 		return nil, err
 	}
 	defer keyBlobCleanup()
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_eddsa_2p_refresh", C.cbmpc_eddsa_2p_refresh(job, keyBlobMem, &outNewKeyBlob))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_eddsa_2p_refresh", C.cbmpc_eddsa_2p_refresh(jobPtr, keyBlobMem, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outNewKeyBlob)
@@ -2002,7 +2082,7 @@ func EdDSA2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byt
 	return cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func EdDSA2PSign(ctx context.Context, session Session, keyBlob []byte, msg []byte) ([]byte, error) {
+func EdDSA2PSign(ctx context.Context, job Job2P, keyBlob []byte, msg []byte) ([]byte, error) {
 	var sigOut C.cmem_t
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msg)
 	if err != nil {
@@ -2011,10 +2091,8 @@ func EdDSA2PSign(ctx context.Context, session Session, keyBlob []byte, msg []byt
 	defer cleanup()
 	keyBlobMem := mems[0]
 	msgMem := mems[1]
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_eddsa_2p_sign", C.cbmpc_eddsa_2p_sign(job, keyBlobMem, msgMem, &sigOut))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_eddsa_2p_sign", C.cbmpc_eddsa_2p_sign(jobPtr, keyBlobMem, msgMem, &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2088,12 +2166,11 @@ func EdDSA2PAttachPrivateScalar(publicKeyBlob []byte, privateScalarFixed []byte,
 // EdDSA-MP
 // -------------------------------
 
-func EdDSAMPDKGAdditive(ctx context.Context, session Session, curve CurveID) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func EdDSAMPDKGAdditive(ctx context.Context, job JobMP, curve CurveID) ([]byte, []byte, error) {
 	var outKeyBlob C.cmem_t
 	var outSID C.cmem_t
-	err := withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_dkg_additive", C.cbmpc_eddsa_mp_dkg_additive(job, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
+	err := withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_dkg_additive", C.cbmpc_eddsa_mp_dkg_additive(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -2103,20 +2180,20 @@ func EdDSAMPDKGAdditive(ctx context.Context, session Session, curve CurveID) ([]
 	return cmemToBytesAndFree(outKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func EdDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func EdDSAMPDKGAC(ctx context.Context, job JobMP, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2129,8 +2206,8 @@ func EdDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []b
 		return nil, nil, err
 	}
 	defer sidInCleanup()
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_dkg_ac", C.cbmpc_eddsa_mp_dkg_ac(job, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &outACKeyBlob, &outSID))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_dkg_ac", C.cbmpc_eddsa_mp_dkg_ac(jobPtr, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &outACKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outACKeyBlob)
@@ -2140,8 +2217,7 @@ func EdDSAMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []b
 	return cmemToBytesAndFree(outACKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func EdDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func EdDSAMPRefreshAdditive(ctx context.Context, job JobMP, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
 	mems, cleanup, err := bytesToOwnedCmems(sidIn, keyBlob)
 	if err != nil {
 		return nil, nil, err
@@ -2151,8 +2227,8 @@ func EdDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, 
 	keyBlobMem := mems[1]
 	var sidOut C.cmem_t
 	var outNewKeyBlob C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_refresh_additive", C.cbmpc_eddsa_mp_refresh_additive(job, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_refresh_additive", C.cbmpc_eddsa_mp_refresh_additive(jobPtr, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -2162,20 +2238,20 @@ func EdDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, 
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func EdDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func EdDSAMPRefreshAC(ctx context.Context, job JobMP, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2190,8 +2266,8 @@ func EdDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyB
 	acKeyBlobMem := mems[1]
 	var sidOut C.cmem_t
 	var outNewACKeyBlob C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_refresh_ac", C.cbmpc_eddsa_mp_refresh_ac(job, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &sidOut, &outNewACKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_refresh_ac", C.cbmpc_eddsa_mp_refresh_ac(jobPtr, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &sidOut, &outNewACKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -2201,12 +2277,13 @@ func EdDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyB
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewACKeyBlob), nil
 }
 
-func EdDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, msg []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func EdDSAMPSignAdditive(ctx context.Context, job JobMP, keyBlob []byte, msg []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msg)
 	if err != nil {
 		return nil, err
@@ -2215,8 +2292,8 @@ func EdDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, m
 	keyBlobMem := mems[0]
 	msgMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_sign_additive", C.cbmpc_eddsa_mp_sign_additive(job, keyBlobMem, msgMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_sign_additive", C.cbmpc_eddsa_mp_sign_additive(jobPtr, keyBlobMem, msgMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2225,12 +2302,13 @@ func EdDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, m
 	return cmemToBytesAndFree(sigOut), nil
 }
 
-func EdDSAMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, access *AccessStructure, msg []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func EdDSAMPSignAC(ctx context.Context, job JobMP, acKeyBlob []byte, access *AccessStructure, msg []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, err
@@ -2245,8 +2323,8 @@ func EdDSAMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, acces
 	acKeyBlobMem := mems[0]
 	msgMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_eddsa_mp_sign_ac", C.cbmpc_eddsa_mp_sign_ac(job, acKeyBlobMem, &compiledAccess.cStruct, msgMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_eddsa_mp_sign_ac", C.cbmpc_eddsa_mp_sign_ac(jobPtr, acKeyBlobMem, &compiledAccess.cStruct, msgMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2320,12 +2398,10 @@ func EdDSAMPAttachPrivateScalar(publicKeyBlob []byte, privateScalarFixed []byte,
 // Schnorr-2PC
 // -------------------------------
 
-func Schnorr2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, error) {
+func Schnorr2PDKG(ctx context.Context, job Job2P, curve CurveID) ([]byte, error) {
 	var outKeyBlob C.cmem_t
-	err := withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_schnorr_2p_dkg", C.cbmpc_schnorr_2p_dkg(job, C.cbmpc_curve_id_t(curve), &outKeyBlob))
-		})
+	err := with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_schnorr_2p_dkg", C.cbmpc_schnorr_2p_dkg(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -2334,17 +2410,15 @@ func Schnorr2PDKG(ctx context.Context, session Session, curve CurveID) ([]byte, 
 	return cmemToBytesAndFree(outKeyBlob), nil
 }
 
-func Schnorr2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byte, error) {
+func Schnorr2PRefresh(ctx context.Context, job Job2P, keyBlob []byte) ([]byte, error) {
 	var outNewKeyBlob C.cmem_t
 	keyBlobMem, keyBlobCleanup, err := bytesToOwnedCmem(keyBlob)
 	if err != nil {
 		return nil, err
 	}
 	defer keyBlobCleanup()
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_schnorr_2p_refresh", C.cbmpc_schnorr_2p_refresh(job, keyBlobMem, &outNewKeyBlob))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_schnorr_2p_refresh", C.cbmpc_schnorr_2p_refresh(jobPtr, keyBlobMem, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(outNewKeyBlob)
@@ -2353,7 +2427,7 @@ func Schnorr2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]b
 	return cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func Schnorr2PSign(ctx context.Context, session Session, keyBlob []byte, msg []byte) ([]byte, error) {
+func Schnorr2PSign(ctx context.Context, job Job2P, keyBlob []byte, msg []byte) ([]byte, error) {
 	var sigOut C.cmem_t
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msg)
 	if err != nil {
@@ -2362,10 +2436,8 @@ func Schnorr2PSign(ctx context.Context, session Session, keyBlob []byte, msg []b
 	defer cleanup()
 	keyBlobMem := mems[0]
 	msgMem := mems[1]
-	err = withDefault2PCJob(ctx, session, func(self TwoPartySelf, p1Name, p2Name string) error {
-		return with2PCJob(ctx, session, self, p1Name, p2Name, func(job *C.cbmpc_2pc_job_t) error {
-			return codeError("cbmpc_schnorr_2p_sign", C.cbmpc_schnorr_2p_sign(job, keyBlobMem, msgMem, &sigOut))
-		})
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_schnorr_2p_sign", C.cbmpc_schnorr_2p_sign(jobPtr, keyBlobMem, msgMem, &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2453,12 +2525,11 @@ func Schnorr2PAttachPrivateScalar(publicKeyBlob []byte, privateScalarFixed []byt
 // Schnorr-MP
 // -------------------------------
 
-func SchnorrMPDKGAdditive(ctx context.Context, session Session, curve CurveID) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func SchnorrMPDKGAdditive(ctx context.Context, job JobMP, curve CurveID) ([]byte, []byte, error) {
 	var outKeyBlob C.cmem_t
 	var outSID C.cmem_t
-	err := withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_dkg_additive", C.cbmpc_schnorr_mp_dkg_additive(job, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
+	err := withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_dkg_additive", C.cbmpc_schnorr_mp_dkg_additive(jobPtr, C.cbmpc_curve_id_t(curve), &outKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outKeyBlob)
@@ -2468,20 +2539,20 @@ func SchnorrMPDKGAdditive(ctx context.Context, session Session, curve CurveID) (
 	return cmemToBytesAndFree(outKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func SchnorrMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func SchnorrMPDKGAC(ctx context.Context, job JobMP, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2494,8 +2565,8 @@ func SchnorrMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn [
 		return nil, nil, err
 	}
 	defer sidInCleanup()
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_dkg_ac", C.cbmpc_schnorr_mp_dkg_ac(job, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &outACKeyBlob, &outSID))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_dkg_ac", C.cbmpc_schnorr_mp_dkg_ac(jobPtr, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &outACKeyBlob, &outSID))
 	})
 	if err != nil {
 		freeCmem(outACKeyBlob)
@@ -2505,8 +2576,7 @@ func SchnorrMPDKGAC(ctx context.Context, session Session, curve CurveID, sidIn [
 	return cmemToBytesAndFree(outACKeyBlob), cmemToBytesAndFree(outSID), nil
 }
 
-func SchnorrMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func SchnorrMPRefreshAdditive(ctx context.Context, job JobMP, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
 	mems, cleanup, err := bytesToOwnedCmems(sidIn, keyBlob)
 	if err != nil {
 		return nil, nil, err
@@ -2516,8 +2586,8 @@ func SchnorrMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte
 	keyBlobMem := mems[1]
 	var sidOut C.cmem_t
 	var outNewKeyBlob C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_refresh_additive", C.cbmpc_schnorr_mp_refresh_additive(job, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_refresh_additive", C.cbmpc_schnorr_mp_refresh_additive(jobPtr, sidInMem, keyBlobMem, &sidOut, &outNewKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -2527,20 +2597,20 @@ func SchnorrMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewKeyBlob), nil
 }
 
-func SchnorrMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func SchnorrMPRefreshAC(ctx context.Context, job JobMP, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2555,8 +2625,8 @@ func SchnorrMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKe
 	acKeyBlobMem := mems[1]
 	var sidOut C.cmem_t
 	var outNewACKeyBlob C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_refresh_ac", C.cbmpc_schnorr_mp_refresh_ac(job, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &sidOut, &outNewACKeyBlob))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_refresh_ac", C.cbmpc_schnorr_mp_refresh_ac(jobPtr, sidInMem, acKeyBlobMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &sidOut, &outNewACKeyBlob))
 	})
 	if err != nil {
 		freeCmem(sidOut)
@@ -2566,12 +2636,13 @@ func SchnorrMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKe
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(outNewACKeyBlob), nil
 }
 
-func SchnorrMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, msg []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func SchnorrMPSignAdditive(ctx context.Context, job JobMP, keyBlob []byte, msg []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	mems, cleanup, err := bytesToOwnedCmems(keyBlob, msg)
 	if err != nil {
 		return nil, err
@@ -2580,8 +2651,8 @@ func SchnorrMPSignAdditive(ctx context.Context, session Session, keyBlob []byte,
 	keyBlobMem := mems[0]
 	msgMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_sign_additive", C.cbmpc_schnorr_mp_sign_additive(job, keyBlobMem, msgMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_sign_additive", C.cbmpc_schnorr_mp_sign_additive(jobPtr, keyBlobMem, msgMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2590,12 +2661,13 @@ func SchnorrMPSignAdditive(ctx context.Context, session Session, keyBlob []byte,
 	return cmemToBytesAndFree(sigOut), nil
 }
 
-func SchnorrMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, access *AccessStructure, msg []byte, sigReceiver int) ([]byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndex("sigReceiver", sigReceiver, partyCount); err != nil {
+func SchnorrMPSignAC(ctx context.Context, job JobMP, acKeyBlob []byte, access *AccessStructure, msg []byte, sigReceiver int) ([]byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
+	if err := validatePartyIndex("sigReceiver", sigReceiver, len(job.PartyNames)); err != nil {
+		return nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, err
@@ -2610,8 +2682,8 @@ func SchnorrMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, acc
 	acKeyBlobMem := mems[0]
 	msgMem := mems[1]
 	var sigOut C.cmem_t
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_schnorr_mp_sign_ac", C.cbmpc_schnorr_mp_sign_ac(job, acKeyBlobMem, &compiledAccess.cStruct, msgMem, C.int32_t(sigReceiver), &sigOut))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_schnorr_mp_sign_ac", C.cbmpc_schnorr_mp_sign_ac(jobPtr, acKeyBlobMem, &compiledAccess.cStruct, msgMem, C.int32_t(sigReceiver), &sigOut))
 	})
 	if err != nil {
 		freeCmem(sigOut)
@@ -2699,15 +2771,14 @@ func SchnorrMPAttachPrivateScalar(publicKeyBlob []byte, privateScalarFixed []byt
 // TDH2
 // -------------------------------
 
-func TDH2DKGAdditive(ctx context.Context, session Session, curve CurveID) ([]byte, [][]byte, []byte, []byte, error) {
-	partyNames := DefaultPartyNames(session.PartyCount())
+func TDH2DKGAdditive(ctx context.Context, job JobMP, curve CurveID) ([]byte, [][]byte, []byte, []byte, error) {
 	var outPublicKey C.cmem_t
 	var outPublicShares C.cmems_t
 	var outPrivateShare C.cmem_t
 	var outSID C.cmem_t
 
-	err := withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_tdh2_dkg_additive", C.cbmpc_tdh2_dkg_additive(job, C.cbmpc_curve_id_t(curve), &outPublicKey, &outPublicShares, &outPrivateShare, &outSID))
+	err := withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_tdh2_dkg_additive", C.cbmpc_tdh2_dkg_additive(jobPtr, C.cbmpc_curve_id_t(curve), &outPublicKey, &outPublicShares, &outPrivateShare, &outSID))
 	})
 	if err != nil {
 		freeCmem(outPublicKey)
@@ -2728,20 +2799,20 @@ func TDH2DKGAdditive(ctx context.Context, session Session, curve CurveID) ([]byt
 	return cmemToBytesAndFree(outPublicKey), publicShares, cmemToBytesAndFree(outPrivateShare), cmemToBytesAndFree(outSID), nil
 }
 
-func TDH2DKGAC(ctx context.Context, session Session, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, [][]byte, []byte, []byte, error) {
-	partyCount := session.PartyCount()
-	if err := validatePartyIndices("quorumPartyIndices", quorumPartyIndices, partyCount); err != nil {
+func TDH2DKGAC(ctx context.Context, job JobMP, curve CurveID, sidIn []byte, access *AccessStructure, quorumPartyNames []string) ([]byte, [][]byte, []byte, []byte, error) {
+	if err := validateJobMP(job); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	partyNames := DefaultPartyNames(partyCount)
-	quorumNames := PartyNamesFromIndices(quorumPartyIndices)
+	if err := validatePartyNameSubset("quorumPartyNames", quorumPartyNames, job.PartyNames); err != nil {
+		return nil, nil, nil, nil, err
+	}
 	compiledAccess, err := compileAccessStructure(access)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	defer compiledAccess.free()
 
-	quorumArray, quorumCStrings, err := createCStringArray(quorumNames)
+	quorumArray, quorumCStrings, err := createCStringArray(quorumPartyNames)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -2757,8 +2828,8 @@ func TDH2DKGAC(ctx context.Context, session Session, curve CurveID, sidIn []byte
 	}
 	defer sidInCleanup()
 
-	err = withMPJob(ctx, session, session.MyIndex(), partyNames, func(job *C.cbmpc_mp_job_t) error {
-		return codeError("cbmpc_tdh2_dkg_ac", C.cbmpc_tdh2_dkg_ac(job, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumNames)), &outPublicKey, &outPublicShares, &outPrivateShare, &outSID))
+	err = withMPJob(ctx, job, func(jobPtr *C.cbmpc_mp_job_t) error {
+		return codeError("cbmpc_tdh2_dkg_ac", C.cbmpc_tdh2_dkg_ac(jobPtr, C.cbmpc_curve_id_t(curve), sidInMem, &compiledAccess.cStruct, (**C.char)(quorumArray), C.int(len(quorumPartyNames)), &outPublicKey, &outPublicShares, &outPrivateShare, &outSID))
 	})
 	if err != nil {
 		freeCmem(outPublicKey)

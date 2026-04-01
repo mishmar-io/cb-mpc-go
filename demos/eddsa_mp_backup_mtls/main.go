@@ -19,6 +19,12 @@ const (
 	signReceiver      = 0
 )
 
+var demoPartyNames = []string{
+	"urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+	"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+	"urn:uuid:3f5d3b64-51d7-58d6-9d8d-3a7e6b1f4032",
+}
+
 type keyMaterial struct {
 	keyBlob       []byte
 	publicKey     []byte
@@ -48,19 +54,19 @@ func main() {
 		log.Fatalf("load TLS config: %v", err)
 	}
 
-	session, err := democommon.NewMTLSSession(cfg.self, len(cfg.partyAddrs), cfg.listenAddr, cfg.partyAddrs, tlsConfig)
+	transport, err := democommon.NewMTLSTransport(cfg.self, len(cfg.partyAddrs), cfg.listenAddr, cfg.partyAddrs, tlsConfig)
 	if err != nil {
-		log.Fatalf("create mTLS session: %v", err)
+		log.Fatalf("create mTLS transport: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() { _ = transport.Close() }()
 
 	peers := otherPartyIndices(cfg.self, len(cfg.partyAddrs))
-	if err := session.WaitForPeers(ctx, peers); err != nil {
+	if err := transport.WaitForPeers(ctx, peers); err != nil {
 		log.Fatalf("wait for peers: %v", err)
 	}
 	log.Printf("party %d connected to peers %v", cfg.self, peers)
 
-	keys, err := runDKGs(ctx, session, cfg.keyCount)
+	keys, err := runDKGs(ctx, transport, demoPartyNames, cfg.keyCount)
 	if err != nil {
 		log.Fatalf("run DKGs: %v", err)
 	}
@@ -74,7 +80,7 @@ func main() {
 		log.Printf("party 0 restored %d signer shares from PVE-AC backup", len(restoredParty0KeyBlobs))
 	}
 
-	if err := runSigningShowcase(ctx, session, keys, restoredParty0KeyBlobs); err != nil {
+	if err := runSigningShowcase(ctx, transport, demoPartyNames, keys, restoredParty0KeyBlobs); err != nil {
 		log.Fatalf("run signing showcase: %v", err)
 	}
 
@@ -153,10 +159,15 @@ func otherPartyIndices(self, partyCount int) []int {
 	return indices
 }
 
-func runDKGs(ctx context.Context, session *democommon.MTLSSession, keyCount int) ([]keyMaterial, error) {
+func runDKGs(ctx context.Context, transport *democommon.MTLSTransport, partyNames []string, keyCount int) ([]keyMaterial, error) {
 	keys := make([]keyMaterial, keyCount)
+	job := mpc.JobMP{
+		Self:       transport.MyIndex(),
+		PartyNames: append([]string(nil), partyNames...),
+		Transport:  transport,
+	}
 	for keyIdx := 0; keyIdx < keyCount; keyIdx++ {
-		keyBlob, sidOut, err := mpc.EdDSAMPDKGAdditive(ctx, session, mpc.CurveEd25519)
+		keyBlob, sidOut, err := mpc.EdDSAMPDKGAdditive(ctx, job, mpc.CurveEd25519)
 		if err != nil {
 			return nil, fmt.Errorf("key %d dkg additive: %w", keyIdx, err)
 		}
@@ -171,7 +182,7 @@ func runDKGs(ctx context.Context, session *democommon.MTLSSession, keyCount int)
 			keyBlob:   keyBlob,
 			publicKey: publicKey,
 		}
-		log.Printf("party %d generated key %d: public key bytes=%d sid bytes=%d", session.MyIndex(), keyIdx, len(publicKey), len(sidOut))
+		log.Printf("party %d generated key %d: public key bytes=%d sid bytes=%d", transport.MyIndex(), keyIdx, len(publicKey), len(sidOut))
 	}
 	return keys, nil
 }
@@ -207,7 +218,7 @@ func backupAndRestoreParty0Shares(keys []keyMaterial) ([][]byte, error) {
 	sensitiveDetachedScalars := mpc.SensitiveSlices(detachedScalars)
 	defer func() { _ = sensitiveDetachedScalars.Close() }()
 
-	label := []byte("cb-mpc-go:eddsa-mp-backup-mtls:party0")
+	label := []byte("cb-mpc-go:eddsa-mp-backup-mtls:restored-signer-2f4b567e")
 	ciphertext, err := mpc.PVEACEncrypt(nil, mpc.CurveEd25519, access, backupLeafNames, backupEKs, label, sensitiveDetachedScalars.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("encrypt detached scalars: %w", err)
@@ -255,7 +266,11 @@ func backupAndRestoreParty0Shares(keys []keyMaterial) ([][]byte, error) {
 }
 
 func backupAccessStructure() (*mpc.AccessStructure, []string, []string) {
-	leafNames := []string{"backup0", "backup1", "backup2"}
+	leafNames := []string{
+		"urn:uuid:54bc82b4-4e56-55ae-b858-d6206a654613",
+		"urn:uuid:0f4c3f34-28e2-5259-9800-0d3f3be8f9ef",
+		"urn:uuid:813f1a5f-53c9-549e-8d16-c2c5a193f357",
+	}
 	return &mpc.AccessStructure{
 		Nodes: []mpc.AccessStructureNode{
 			{Type: mpc.AccessNodeLeaf, LeafName: leafNames[0]},
@@ -267,30 +282,35 @@ func backupAccessStructure() (*mpc.AccessStructure, []string, []string) {
 	}, leafNames, []string{leafNames[0], leafNames[2]}
 }
 
-func runSigningShowcase(ctx context.Context, session *democommon.MTLSSession, keys []keyMaterial, restoredParty0KeyBlobs [][]byte) error {
+func runSigningShowcase(ctx context.Context, transport *democommon.MTLSTransport, partyNames []string, keys []keyMaterial, restoredParty0KeyBlobs [][]byte) error {
+	job := mpc.JobMP{
+		Self:       transport.MyIndex(),
+		PartyNames: append([]string(nil), partyNames...),
+		Transport:  transport,
+	}
 	for keyIdx, key := range keys {
 		keyBlob := key.keyBlob
-		if session.MyIndex() == signReceiver && len(restoredParty0KeyBlobs) != 0 {
+		if transport.MyIndex() == signReceiver && len(restoredParty0KeyBlobs) != 0 {
 			keyBlob = restoredParty0KeyBlobs[keyIdx]
 		}
 
 		msg := []byte(fmt.Sprintf("cb-mpc-go eddsa mp backup mTLS demo key %d", keyIdx))
-		sig, err := mpc.EdDSAMPSignAdditive(ctx, session, keyBlob, msg, signReceiver)
+		sig, err := mpc.EdDSAMPSignAdditive(ctx, job, keyBlob, msg, signReceiver)
 		if err != nil {
 			return fmt.Errorf("key %d sign additive: %w", keyIdx, err)
 		}
 
-		if session.MyIndex() == signReceiver {
+		if transport.MyIndex() == signReceiver {
 			if !ed25519.Verify(ed25519.PublicKey(key.publicKey), msg, sig) {
 				return fmt.Errorf("key %d signature failed verification", keyIdx)
 			}
-			log.Printf("party %d verified restored signature for key %d: public key bytes=%d signature bytes=%d", session.MyIndex(), keyIdx, len(key.publicKey), len(sig))
+			log.Printf("party %d verified restored signature for key %d: public key bytes=%d signature bytes=%d", transport.MyIndex(), keyIdx, len(key.publicKey), len(sig))
 			continue
 		}
 		if len(sig) != 0 {
-			return fmt.Errorf("party %d should not receive signature bytes for key %d", session.MyIndex(), keyIdx)
+			return fmt.Errorf("party %d should not receive signature bytes for key %d", transport.MyIndex(), keyIdx)
 		}
-		log.Printf("party %d participated in signing key %d", session.MyIndex(), keyIdx)
+		log.Printf("party %d participated in signing key %d", transport.MyIndex(), keyIdx)
 	}
 	return nil
 }

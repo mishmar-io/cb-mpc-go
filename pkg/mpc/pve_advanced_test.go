@@ -253,8 +253,8 @@ func TestPVEAdvancedHSMAndKEMFlows(t *testing.T) {
 	})
 
 	t.Run("rsa-modulus-ac-hsm", func(t *testing.T) {
-		access, quorumPartyIndices := thresholdAccessStructure()
-		leafNames := defaultPartyNames(3)
+		leafNames := testPartyNames("pve-advanced/rsa-ac-hsm", 3)
+		access, quorumPartyIndices := thresholdAccessStructure(leafNames)
 		leafEKs := make([][]byte, len(leafNames))
 		leafKeys := make([]*rsa.PrivateKey, len(leafNames))
 		for i := range leafNames {
@@ -303,7 +303,7 @@ func TestPVEAdvancedHSMAndKEMFlows(t *testing.T) {
 			shares[i] = share
 		}
 
-		recoveredRows, err := PVEACAggregateToRestoreRow(nil, CurveP256, access, partyNamesFromIndices(quorumPartyIndices), shares, ciphertext, 0, label)
+		recoveredRows, err := PVEACAggregateToRestoreRow(nil, CurveP256, access, partyNamesFromIndices(leafNames, quorumPartyIndices), shares, ciphertext, 0, label)
 		if err != nil {
 			t.Fatalf("aggregate: %v", err)
 		}
@@ -311,8 +311,8 @@ func TestPVEAdvancedHSMAndKEMFlows(t *testing.T) {
 	})
 
 	t.Run("ecies-oct-ac-hsm", func(t *testing.T) {
-		access, quorumPartyIndices := thresholdAccessStructure()
-		leafNames := defaultPartyNames(3)
+		leafNames := testPartyNames("pve-advanced/ecies-ac-hsm", 3)
+		access, quorumPartyIndices := thresholdAccessStructure(leafNames)
 		leafEKs := make([][]byte, len(leafNames))
 		leafKeys := make([]*ecdh.PrivateKey, len(leafNames))
 		for i := range leafNames {
@@ -362,7 +362,7 @@ func TestPVEAdvancedHSMAndKEMFlows(t *testing.T) {
 			shares[i] = share
 		}
 
-		recoveredRows, err := PVEACAggregateToRestoreRow(nil, CurveP256, access, partyNamesFromIndices(quorumPartyIndices), shares, ciphertext, 0, label)
+		recoveredRows, err := PVEACAggregateToRestoreRow(nil, CurveP256, access, partyNamesFromIndices(leafNames, quorumPartyIndices), shares, ciphertext, 0, label)
 		if err != nil {
 			t.Fatalf("aggregate: %v", err)
 		}

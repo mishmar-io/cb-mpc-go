@@ -18,6 +18,7 @@ import (
 func TestECDSA2PCFlow(t *testing.T) {
 	ctx := testContext(t)
 	sessions := mpctest.NewMockNetwork(2)
+	jobs := test2PJobs("api/ecdsa-2p", sessions)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -26,7 +27,7 @@ func TestECDSA2PCFlow(t *testing.T) {
 
 	keyBlobs := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, err := ECDSA2PDKG(ctx, sessions[idx], CurveSecp256k1)
+		keyBlob, err := ECDSA2PDKG(ctx, jobs[idx], CurveSecp256k1)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -47,7 +48,7 @@ func TestECDSA2PCFlow(t *testing.T) {
 	hash := sha256.Sum256([]byte("ecdsa-flow"))
 	signatures := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		_, sigDER, err := ECDSA2PSign(ctx, sessions[idx], keyBlobs[idx], hash[:], nil)
+		_, sigDER, err := ECDSA2PSign(ctx, jobs[idx], keyBlobs[idx], hash[:], nil)
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -60,7 +61,7 @@ func TestECDSA2PCFlow(t *testing.T) {
 
 	refreshed := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, err := ECDSA2PRefresh(ctx, sessions[idx], keyBlobs[idx])
+		keyBlob, err := ECDSA2PRefresh(ctx, jobs[idx], keyBlobs[idx])
 		if err != nil {
 			return fmt.Errorf("refresh: %w", err)
 		}
@@ -84,6 +85,7 @@ func TestECDSA2PCFlow(t *testing.T) {
 func TestSchnorr2PCFlow(t *testing.T) {
 	ctx := testContext(t)
 	sessions := mpctest.NewMockNetwork(2)
+	jobs := test2PJobs("api/schnorr-2p", sessions)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -92,7 +94,7 @@ func TestSchnorr2PCFlow(t *testing.T) {
 
 	keyBlobs := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, err := Schnorr2PDKG(ctx, sessions[idx], CurveSecp256k1)
+		keyBlob, err := Schnorr2PDKG(ctx, jobs[idx], CurveSecp256k1)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -113,7 +115,7 @@ func TestSchnorr2PCFlow(t *testing.T) {
 	msgHash := sha256.Sum256([]byte("schnorr-flow"))
 	sigs := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		sig, err := Schnorr2PSign(ctx, sessions[idx], keyBlobs[idx], msgHash[:])
+		sig, err := Schnorr2PSign(ctx, jobs[idx], keyBlobs[idx], msgHash[:])
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -127,6 +129,7 @@ func TestSchnorr2PCFlow(t *testing.T) {
 func TestEdDSA2PCFlow(t *testing.T) {
 	ctx := testContext(t)
 	sessions := mpctest.NewMockNetwork(2)
+	jobs := test2PJobs("api/eddsa-2p", sessions)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -135,7 +138,7 @@ func TestEdDSA2PCFlow(t *testing.T) {
 
 	keyBlobs := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, err := EdDSA2PDKG(ctx, sessions[idx], CurveEd25519)
+		keyBlob, err := EdDSA2PDKG(ctx, jobs[idx], CurveEd25519)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -159,7 +162,7 @@ func TestEdDSA2PCFlow(t *testing.T) {
 	msg := []byte("eddsa-flow")
 	sigs := make([][]byte, 2)
 	runPerParty(t, sessions, func(idx int) error {
-		sig, err := EdDSA2PSign(ctx, sessions[idx], keyBlobs[idx], msg)
+		sig, err := EdDSA2PSign(ctx, jobs[idx], keyBlobs[idx], msg)
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -177,6 +180,8 @@ func TestTDH2Flow(t *testing.T) {
 	ctx := testContext(t)
 	const parties = 3
 	sessions := mpctest.NewMockNetwork(parties)
+	partyNames := testPartyNames("api/tdh2-additive", parties)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -187,7 +192,7 @@ func TestTDH2Flow(t *testing.T) {
 	publicShares := make([][][]byte, parties)
 	privateShares := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		publicKey, shares, privateShare, _, err := TDH2DKGAdditive(ctx, sessions[idx], CurveP256)
+		publicKey, shares, privateShare, _, err := TDH2DKGAdditive(ctx, jobs[idx], CurveP256)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -267,6 +272,8 @@ func TestECDSAMPAdditiveFlow(t *testing.T) {
 	ctx := testContext(t)
 	const parties = 3
 	sessions := mpctest.NewMockNetwork(parties)
+	partyNames := testPartyNames("api/ecdsa-mp-additive", parties)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -276,7 +283,7 @@ func TestECDSAMPAdditiveFlow(t *testing.T) {
 	keyBlobs := make([][]byte, parties)
 	sidOuts := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, sidOut, err := ECDSAMPDKGAdditive(ctx, sessions[idx], CurveSecp256k1)
+		keyBlob, sidOut, err := ECDSAMPDKGAdditive(ctx, jobs[idx], CurveSecp256k1)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -299,7 +306,7 @@ func TestECDSAMPAdditiveFlow(t *testing.T) {
 	const sigReceiver = 0
 	sigs := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		sig, err := ECDSAMPSignAdditive(ctx, sessions[idx], keyBlobs[idx], hash[:], sigReceiver)
+		sig, err := ECDSAMPSignAdditive(ctx, jobs[idx], keyBlobs[idx], hash[:], sigReceiver)
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -319,7 +326,7 @@ func TestECDSAMPAdditiveFlow(t *testing.T) {
 
 	refreshed := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		_, keyBlob, err := ECDSAMPRefreshAdditive(ctx, sessions[idx], sidOuts[idx], keyBlobs[idx])
+		_, keyBlob, err := ECDSAMPRefreshAdditive(ctx, jobs[idx], sidOuts[idx], keyBlobs[idx])
 		if err != nil {
 			return fmt.Errorf("refresh: %w", err)
 		}
@@ -348,6 +355,8 @@ func TestEdDSAMPAdditiveFlow(t *testing.T) {
 	ctx := testContext(t)
 	const parties = 3
 	sessions := mpctest.NewMockNetwork(parties)
+	partyNames := testPartyNames("api/eddsa-mp-additive", parties)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -356,7 +365,7 @@ func TestEdDSAMPAdditiveFlow(t *testing.T) {
 
 	keyBlobs := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, _, err := EdDSAMPDKGAdditive(ctx, sessions[idx], CurveEd25519)
+		keyBlob, _, err := EdDSAMPDKGAdditive(ctx, jobs[idx], CurveEd25519)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -381,7 +390,7 @@ func TestEdDSAMPAdditiveFlow(t *testing.T) {
 	msg := []byte("eddsa-mp-flow")
 	sigs := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		sig, err := EdDSAMPSignAdditive(ctx, sessions[idx], keyBlobs[idx], msg, sigReceiver)
+		sig, err := EdDSAMPSignAdditive(ctx, jobs[idx], keyBlobs[idx], msg, sigReceiver)
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -406,6 +415,8 @@ func TestSchnorrMPAdditiveFlow(t *testing.T) {
 	ctx := testContext(t)
 	const parties = 3
 	sessions := mpctest.NewMockNetwork(parties)
+	partyNames := testPartyNames("api/schnorr-mp-additive", parties)
+	jobs := jobsMP(sessions, partyNames)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -414,7 +425,7 @@ func TestSchnorrMPAdditiveFlow(t *testing.T) {
 
 	keyBlobs := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		keyBlob, _, err := SchnorrMPDKGAdditive(ctx, sessions[idx], CurveSecp256k1)
+		keyBlob, _, err := SchnorrMPDKGAdditive(ctx, jobs[idx], CurveSecp256k1)
 		if err != nil {
 			return fmt.Errorf("dkg: %w", err)
 		}
@@ -436,7 +447,7 @@ func TestSchnorrMPAdditiveFlow(t *testing.T) {
 	const sigReceiver = 0
 	sigs := make([][]byte, parties)
 	runPerParty(t, sessions, func(idx int) error {
-		sig, err := SchnorrMPSignAdditive(ctx, sessions[idx], keyBlobs[idx], msgHash[:], sigReceiver)
+		sig, err := SchnorrMPSignAdditive(ctx, jobs[idx], keyBlobs[idx], msgHash[:], sigReceiver)
 		if err != nil {
 			return fmt.Errorf("sign: %w", err)
 		}
@@ -487,18 +498,18 @@ func TestPVESingleFlow(t *testing.T) {
 
 func TestPVEACFlow(t *testing.T) {
 	const leaves = 3
+	leafNames := testPartyNames("api/pve-ac", leaves)
 
 	// Build a 2-of-3 threshold access structure.
 	access := &AccessStructure{
 		Nodes: []AccessStructureNode{
-			{Type: AccessNodeLeaf, LeafName: "party0"},
-			{Type: AccessNodeLeaf, LeafName: "party1"},
-			{Type: AccessNodeLeaf, LeafName: "party2"},
+			{Type: AccessNodeLeaf, LeafName: leafNames[0]},
+			{Type: AccessNodeLeaf, LeafName: leafNames[1]},
+			{Type: AccessNodeLeaf, LeafName: leafNames[2]},
 			{Type: AccessNodeThreshold, ThresholdK: 2, Children: []int{0, 1, 2}},
 		},
 		Root: 3,
 	}
-	leafNames := []string{"party0", "party1", "party2"}
 
 	eks := make([][]byte, leaves)
 	dks := make([][]byte, leaves)
@@ -530,10 +541,10 @@ func TestPVEACFlow(t *testing.T) {
 		t.Fatalf("verify: %v", err)
 	}
 
-	// Use party0 and party1 as the quorum (2-of-3).
+	// Use the first two leaves as the quorum (2-of-3).
 	// rowIndex refers to the quorum row in the access structure matrix.
 	const rowIndex = 0
-	quorumLeafNames := []string{"party0", "party1"}
+	quorumLeafNames := []string{leafNames[0], leafNames[1]}
 	quorumIndices := []int{0, 1}
 
 	shares := make([][]byte, len(quorumIndices))
@@ -559,12 +570,12 @@ func TestPVEACFlow(t *testing.T) {
 	}
 }
 
-func runPerParty(t *testing.T, sessions []*mpctest.MockSession, fn func(idx int) error) {
+func runPerParty[T any](t *testing.T, parties []T, fn func(idx int) error) {
 	t.Helper()
 
-	errCh := make(chan error, len(sessions))
+	errCh := make(chan error, len(parties))
 	var wg sync.WaitGroup
-	for i := range sessions {
+	for i := range parties {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

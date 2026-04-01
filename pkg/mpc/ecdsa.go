@@ -7,24 +7,40 @@ import (
 )
 
 // ECDSA2PDKG performs two-party distributed key generation for ECDSA on the given curve.
-func ECDSA2PDKG(ctx context.Context, session Session, curve Curve) ([]byte, error) {
+func ECDSA2PDKG(ctx context.Context, job Job2P, curve Curve) ([]byte, error) {
+	cgoJob, err := toCGOJob2P(job)
+	if err != nil {
+		return nil, wrapPublicError("ECDSA2PDKG", err)
+	}
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
 		return nil, wrapPublicError("ECDSA2PDKG", err)
 	}
-	keyBlob, err := cinterop.ECDSA2PDKG(ctx, session, cgoCurve)
+	keyBlob, err := cinterop.ECDSA2PDKG(ctx, cgoJob, cgoCurve)
 	return wrapResult1("ECDSA2PDKG", keyBlob, err)
 }
 
 // ECDSA2PRefresh refreshes a two-party ECDSA key share without changing the joint public key.
-func ECDSA2PRefresh(ctx context.Context, session Session, keyBlob []byte) ([]byte, error) {
-	refreshedKeyBlob, err := cinterop.ECDSA2PRefresh(ctx, session, keyBlob)
+func ECDSA2PRefresh(ctx context.Context, job Job2P, keyBlob []byte) ([]byte, error) {
+	cgoJob, err := toCGOJob2P(job)
+	if err != nil {
+		return nil, wrapPublicError("ECDSA2PRefresh", err)
+	}
+	refreshedKeyBlob, err := cinterop.ECDSA2PRefresh(ctx, cgoJob, keyBlob)
 	return wrapResult1("ECDSA2PRefresh", refreshedKeyBlob, err)
 }
 
-// ECDSA2PSign produces a two-party ECDSA signature over msgHash, returning a session ID and DER-encoded signature.
-func ECDSA2PSign(ctx context.Context, session Session, keyBlob []byte, msgHash []byte, sidIn []byte) ([]byte, []byte, error) {
-	sidOut, sigDER, err := cinterop.ECDSA2PSign(ctx, session, keyBlob, msgHash, sidIn)
+// ECDSA2PSign signs msgHash and returns the session ID used for the run plus a
+// DER-encoded signature.
+//
+// The signature is produced only on P1. When job.Self is `TwoPartyP2`, sigDER
+// may be empty on successful completion.
+func ECDSA2PSign(ctx context.Context, job Job2P, keyBlob []byte, msgHash []byte, sidIn []byte) (sidOut []byte, sigDER []byte, err error) {
+	cgoJob, err := toCGOJob2P(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSA2PSign", err)
+	}
+	sidOut, sigDER, err = cinterop.ECDSA2PSign(ctx, cgoJob, keyBlob, msgHash, sidIn)
 	return wrapResult2("ECDSA2PSign", sidOut, sigDER, err)
 }
 
@@ -40,9 +56,10 @@ func ECDSA2PGetPublicShareCompressed(keyBlob []byte) ([]byte, error) {
 	return wrapResult1("ECDSA2PGetPublicShareCompressed", publicShare, err)
 }
 
-// ECDSA2PDetachPrivateScalar splits a two-party ECDSA key blob into a public-only blob and a raw private scalar.
-func ECDSA2PDetachPrivateScalar(keyBlob []byte) ([]byte, []byte, error) {
-	publicKeyBlob, privateScalar, err := cinterop.ECDSA2PDetachPrivateScalar(keyBlob)
+// ECDSA2PDetachPrivateScalar splits a two-party ECDSA key blob into a
+// public-only blob and a raw private scalar.
+func ECDSA2PDetachPrivateScalar(keyBlob []byte) (publicKeyBlob []byte, privateScalar []byte, err error) {
+	publicKeyBlob, privateScalar, err = cinterop.ECDSA2PDetachPrivateScalar(keyBlob)
 	return wrapResult2("ECDSA2PDetachPrivateScalar", publicKeyBlob, privateScalar, err)
 }
 
@@ -52,18 +69,31 @@ func ECDSA2PAttachPrivateScalar(publicKeyBlob []byte, privateScalar []byte, publ
 	return wrapResult1("ECDSA2PAttachPrivateScalar", keyBlob, err)
 }
 
-// ECDSAMPDKGAdditive performs multi-party distributed key generation for ECDSA with additive shares.
-func ECDSAMPDKGAdditive(ctx context.Context, session Session, curve Curve) ([]byte, []byte, error) {
+// ECDSAMPDKGAdditive performs multi-party distributed key generation for ECDSA
+// with additive shares, returning the key blob and output session ID.
+func ECDSAMPDKGAdditive(ctx context.Context, job JobMP, curve Curve) (keyBlob []byte, sidOut []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPDKGAdditive", err)
+	}
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
 		return nil, nil, wrapPublicError("ECDSAMPDKGAdditive", err)
 	}
-	keyBlob, sidOut, err := cinterop.ECDSAMPDKGAdditive(ctx, session, cgoCurve)
+	keyBlob, sidOut, err = cinterop.ECDSAMPDKGAdditive(ctx, cgoJob, cgoCurve)
 	return wrapResult2("ECDSAMPDKGAdditive", keyBlob, sidOut, err)
 }
 
-// ECDSAMPDKGAC performs multi-party ECDSA DKG governed by an access-structure quorum policy.
-func ECDSAMPDKGAC(ctx context.Context, session Session, curve Curve, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
+// ECDSAMPDKGAC performs multi-party ECDSA DKG governed by an access-structure
+// quorum policy, returning the AC key blob and output session ID.
+func ECDSAMPDKGAC(ctx context.Context, job JobMP, curve Curve, sidIn []byte, access *AccessStructure, quorumPartyNames []string) (acKeyBlob []byte, sidOut []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPDKGAC", err)
+	}
+	if err := validatePartyNameSubset("quorumPartyNames", job.PartyNames, quorumPartyNames); err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPDKGAC", err)
+	}
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
 		return nil, nil, wrapPublicError("ECDSAMPDKGAC", err)
@@ -72,39 +102,66 @@ func ECDSAMPDKGAC(ctx context.Context, session Session, curve Curve, sidIn []byt
 	if err != nil {
 		return nil, nil, wrapPublicError("ECDSAMPDKGAC", err)
 	}
-	acKeyBlob, sidOut, err := cinterop.ECDSAMPDKGAC(ctx, session, cgoCurve, sidIn, cgoAccess, quorumPartyIndices)
+	acKeyBlob, sidOut, err = cinterop.ECDSAMPDKGAC(ctx, cgoJob, cgoCurve, sidIn, cgoAccess, quorumPartyNames)
 	return wrapResult2("ECDSAMPDKGAC", acKeyBlob, sidOut, err)
 }
 
-// ECDSAMPRefreshAdditive refreshes multi-party ECDSA additive key shares without changing the joint public key.
-func ECDSAMPRefreshAdditive(ctx context.Context, session Session, sidIn []byte, keyBlob []byte) ([]byte, []byte, error) {
-	sidOut, refreshedKeyBlob, err := cinterop.ECDSAMPRefreshAdditive(ctx, session, sidIn, keyBlob)
+// ECDSAMPRefreshAdditive refreshes multi-party ECDSA additive key shares
+// without changing the joint public key, returning the new session ID and
+// refreshed key blob.
+func ECDSAMPRefreshAdditive(ctx context.Context, job JobMP, sidIn []byte, keyBlob []byte) (sidOut []byte, refreshedKeyBlob []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPRefreshAdditive", err)
+	}
+	sidOut, refreshedKeyBlob, err = cinterop.ECDSAMPRefreshAdditive(ctx, cgoJob, sidIn, keyBlob)
 	return wrapResult2("ECDSAMPRefreshAdditive", sidOut, refreshedKeyBlob, err)
 }
 
-// ECDSAMPRefreshAC refreshes multi-party ECDSA key shares under an access-structure quorum policy.
-func ECDSAMPRefreshAC(ctx context.Context, session Session, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, []byte, error) {
+// ECDSAMPRefreshAC refreshes multi-party ECDSA key shares under an
+// access-structure quorum policy, returning the new session ID and refreshed AC
+// key blob.
+func ECDSAMPRefreshAC(ctx context.Context, job JobMP, sidIn []byte, acKeyBlob []byte, access *AccessStructure, quorumPartyNames []string) (sidOut []byte, refreshedKeyBlob []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPRefreshAC", err)
+	}
+	if err := validatePartyNameSubset("quorumPartyNames", job.PartyNames, quorumPartyNames); err != nil {
+		return nil, nil, wrapPublicError("ECDSAMPRefreshAC", err)
+	}
 	cgoAccess, err := toCGOAccessStructure(access)
 	if err != nil {
 		return nil, nil, wrapPublicError("ECDSAMPRefreshAC", err)
 	}
-	sidOut, refreshedKeyBlob, err := cinterop.ECDSAMPRefreshAC(ctx, session, sidIn, acKeyBlob, cgoAccess, quorumPartyIndices)
+	sidOut, refreshedKeyBlob, err = cinterop.ECDSAMPRefreshAC(ctx, cgoJob, sidIn, acKeyBlob, cgoAccess, quorumPartyNames)
 	return wrapResult2("ECDSAMPRefreshAC", sidOut, refreshedKeyBlob, err)
 }
 
 // ECDSAMPSignAdditive produces a multi-party ECDSA signature with additive shares; only sigReceiver gets the result.
-func ECDSAMPSignAdditive(ctx context.Context, session Session, keyBlob []byte, msgHash []byte, sigReceiver int) ([]byte, error) {
-	sigDER, err := cinterop.ECDSAMPSignAdditive(ctx, session, keyBlob, msgHash, sigReceiver)
+//
+// sigReceiver is interpreted as an index into job.PartyNames.
+func ECDSAMPSignAdditive(ctx context.Context, job JobMP, keyBlob []byte, msgHash []byte, sigReceiver int) ([]byte, error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, wrapPublicError("ECDSAMPSignAdditive", err)
+	}
+	sigDER, err := cinterop.ECDSAMPSignAdditive(ctx, cgoJob, keyBlob, msgHash, sigReceiver)
 	return wrapResult1("ECDSAMPSignAdditive", sigDER, err)
 }
 
 // ECDSAMPSignAC produces a multi-party ECDSA signature under an access-structure quorum policy.
-func ECDSAMPSignAC(ctx context.Context, session Session, acKeyBlob []byte, access *AccessStructure, msgHash []byte, sigReceiver int) ([]byte, error) {
+//
+// sigReceiver is interpreted as an index into job.PartyNames.
+func ECDSAMPSignAC(ctx context.Context, job JobMP, acKeyBlob []byte, access *AccessStructure, msgHash []byte, sigReceiver int) ([]byte, error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, wrapPublicError("ECDSAMPSignAC", err)
+	}
 	cgoAccess, err := toCGOAccessStructure(access)
 	if err != nil {
 		return nil, wrapPublicError("ECDSAMPSignAC", err)
 	}
-	sigDER, err := cinterop.ECDSAMPSignAC(ctx, session, acKeyBlob, cgoAccess, msgHash, sigReceiver)
+	sigDER, err := cinterop.ECDSAMPSignAC(ctx, cgoJob, acKeyBlob, cgoAccess, msgHash, sigReceiver)
 	return wrapResult1("ECDSAMPSignAC", sigDER, err)
 }
 
@@ -120,9 +177,10 @@ func ECDSAMPGetPublicShareCompressed(keyBlob []byte) ([]byte, error) {
 	return wrapResult1("ECDSAMPGetPublicShareCompressed", publicShare, err)
 }
 
-// ECDSAMPDetachPrivateScalar splits a multi-party ECDSA key blob into a public-only blob and a raw private scalar.
-func ECDSAMPDetachPrivateScalar(keyBlob []byte) ([]byte, []byte, error) {
-	publicKeyBlob, privateScalar, err := cinterop.ECDSAMPDetachPrivateScalar(keyBlob)
+// ECDSAMPDetachPrivateScalar splits a multi-party ECDSA key blob into a
+// public-only blob and a raw private scalar.
+func ECDSAMPDetachPrivateScalar(keyBlob []byte) (publicKeyBlob []byte, privateScalar []byte, err error) {
+	publicKeyBlob, privateScalar, err = cinterop.ECDSAMPDetachPrivateScalar(keyBlob)
 	return wrapResult2("ECDSAMPDetachPrivateScalar", publicKeyBlob, privateScalar, err)
 }
 

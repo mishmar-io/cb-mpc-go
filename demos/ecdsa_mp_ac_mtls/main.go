@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -10,22 +11,21 @@ import (
 	"strings"
 	"time"
 
-	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	secp256k1ecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-
 	democommon "github.com/coinbase/cb-mpc-go/demos/common"
 	"github.com/coinbase/cb-mpc-go/pkg/mpc"
 )
 
 const (
-	dkgStagePortOffset     = 0
-	signStagePortOffset    = 100
-	refreshStagePortOffset = 200
-	resignStagePortOffset  = 300
+	dkgStagePortOffset     = democommon.ECDSAMPACDKGStagePortOffset
+	signStagePortOffset    = democommon.ECDSAMPACSignStagePortOffset
+	refreshStagePortOffset = democommon.ECDSAMPACRefreshStagePortOffset
+	resignStagePortOffset  = democommon.ECDSAMPACResignStagePortOffset
 	ecdsaPartyCount        = 3
 	onlineQuorumCount      = 2
 	signReceiver           = 0
 )
+
+var demoPartyNames = democommon.DefaultECDSAMPACPartyNames()
 
 type config struct {
 	self       int
@@ -47,37 +47,36 @@ func main() {
 		log.Fatalf("load TLS config: %v", err)
 	}
 
-	access, quorumPartyIndices := quorumAccessStructure()
-	stage0Addrs, err := offsetAddresses(cfg.partyAddrs, dkgStagePortOffset)
+	partyNames := append([]string(nil), demoPartyNames...)
+	access, err := democommon.ThresholdAccessStructure(partyNames, 2)
+	if err != nil {
+		log.Fatalf("build access structure: %v", err)
+	}
+	quorumPartyIndices := []int{0, 1}
+	quorumPartyNames, err := mpc.PartyNamesFromIndices(partyNames, quorumPartyIndices)
+	if err != nil {
+		log.Fatalf("quorum party names: %v", err)
+	}
+	stage0Addrs, err := democommon.OffsetAddresses(cfg.partyAddrs, dkgStagePortOffset)
 	if err != nil {
 		log.Fatalf("stage0 addresses: %v", err)
 	}
 
-	session, err := democommon.NewMTLSSession(cfg.self, ecdsaPartyCount, stage0Addrs[cfg.self], stage0Addrs, tlsConfig)
-	if err != nil {
-		log.Fatalf("create DKG session: %v", err)
-	}
-	if err := session.WaitForPeers(ctx, otherPartyIndices(cfg.self, ecdsaPartyCount)); err != nil {
-		log.Fatalf("wait for DKG peers: %v", err)
-	}
-
-	acKeyBlob, sidOut, err := mpc.ECDSAMPDKGAC(ctx, session, mpc.CurveSecp256k1, nil, access, quorumPartyIndices)
+	dkgResult, err := democommon.RunECDSAMPACDKG(ctx, cfg.self, partyNames, stage0Addrs, tlsConfig, mpc.CurveSecp256k1, access, quorumPartyNames)
 	if err != nil {
 		log.Fatalf("dkg ac: %v", err)
 	}
-	publicKeyCompressed, err := mpc.ECDSAMPGetPublicKeyCompressed(acKeyBlob)
-	if err != nil {
-		log.Fatalf("get public key: %v", err)
-	}
+	acKeyBlob := dkgResult.ACKeyBlob
+	sidOut := dkgResult.SID
+	publicKeyCompressed := dkgResult.PublicKeyCompressed
 	log.Printf("party %d DKG AC complete: public key bytes=%d sid bytes=%d", cfg.self, len(publicKeyCompressed), len(sidOut))
-	_ = session.Close()
 
 	msgHash := sha256.Sum256([]byte("cb-mpc-go ecdsa mp ac mTLS demo"))
-	signStageAddrs, err := offsetAddresses(cfg.partyAddrs[:onlineQuorumCount], signStagePortOffset)
+	signStageAddrs, err := democommon.OffsetAddresses(cfg.partyAddrs[:onlineQuorumCount], signStagePortOffset)
 	if err != nil {
 		log.Fatalf("sign stage addresses: %v", err)
 	}
-	sigDER, err := maybeRunSignStage(ctx, cfg, tlsConfig, signStageAddrs, access, acKeyBlob, msgHash[:], publicKeyCompressed, "initial")
+	sigDER, err := maybeRunSignStage(ctx, cfg, tlsConfig, signStageAddrs, access, quorumPartyNames, acKeyBlob, msgHash[:], publicKeyCompressed, "initial")
 	if err != nil {
 		log.Fatalf("initial sign stage: %v", err)
 	}
@@ -85,37 +84,27 @@ func main() {
 		log.Printf("party %d initial sign verified, signature bytes=%d", cfg.self, len(sigDER))
 	}
 
-	refreshStageAddrs, err := offsetAddresses(cfg.partyAddrs, refreshStagePortOffset)
+	refreshStageAddrs, err := democommon.OffsetAddresses(cfg.partyAddrs, refreshStagePortOffset)
 	if err != nil {
 		log.Fatalf("refresh stage addresses: %v", err)
 	}
-	refreshSession, err := democommon.NewMTLSSession(cfg.self, ecdsaPartyCount, refreshStageAddrs[cfg.self], refreshStageAddrs, tlsConfig)
-	if err != nil {
-		log.Fatalf("create refresh session: %v", err)
-	}
-	if err := refreshSession.WaitForPeers(ctx, otherPartyIndices(cfg.self, ecdsaPartyCount)); err != nil {
-		log.Fatalf("wait for refresh peers: %v", err)
-	}
-
-	refreshedSIDOut, refreshedKeyBlob, err := mpc.ECDSAMPRefreshAC(ctx, refreshSession, sidOut, acKeyBlob, access, quorumPartyIndices)
+	refreshResult, err := democommon.RunECDSAMPACRefresh(ctx, cfg.self, partyNames, refreshStageAddrs, tlsConfig, access, quorumPartyNames, sidOut, acKeyBlob)
 	if err != nil {
 		log.Fatalf("refresh ac: %v", err)
 	}
-	refreshedPublicKeyCompressed, err := mpc.ECDSAMPGetPublicKeyCompressed(refreshedKeyBlob)
-	if err != nil {
-		log.Fatalf("get refreshed public key: %v", err)
-	}
-	if !equalBytes(publicKeyCompressed, refreshedPublicKeyCompressed) {
+	refreshedSIDOut := refreshResult.SID
+	refreshedKeyBlob := refreshResult.ACKeyBlob
+	refreshedPublicKeyCompressed := refreshResult.PublicKeyCompressed
+	if !bytes.Equal(publicKeyCompressed, refreshedPublicKeyCompressed) {
 		log.Fatalf("refreshed public key mismatch")
 	}
 	log.Printf("party %d refresh AC complete: sid bytes=%d", cfg.self, len(refreshedSIDOut))
-	_ = refreshSession.Close()
 
-	resignStageAddrs, err := offsetAddresses(cfg.partyAddrs[:onlineQuorumCount], resignStagePortOffset)
+	resignStageAddrs, err := democommon.OffsetAddresses(cfg.partyAddrs[:onlineQuorumCount], resignStagePortOffset)
 	if err != nil {
 		log.Fatalf("resign stage addresses: %v", err)
 	}
-	sigDER, err = maybeRunSignStage(ctx, cfg, tlsConfig, resignStageAddrs, access, refreshedKeyBlob, msgHash[:], refreshedPublicKeyCompressed, "refreshed")
+	sigDER, err = maybeRunSignStage(ctx, cfg, tlsConfig, resignStageAddrs, access, quorumPartyNames, refreshedKeyBlob, msgHash[:], refreshedPublicKeyCompressed, "refreshed")
 	if err != nil {
 		log.Fatalf("refreshed sign stage: %v", err)
 	}
@@ -169,37 +158,19 @@ func parseConfig() config {
 	return cfg
 }
 
-func maybeRunSignStage(ctx context.Context, cfg config, tlsConfig *tls.Config, signAddrs []string, access *mpc.AccessStructure, acKeyBlob []byte, msgHash []byte, publicKeyCompressed []byte, stage string) ([]byte, error) {
+func maybeRunSignStage(ctx context.Context, cfg config, tlsConfig *tls.Config, signAddrs []string, access *mpc.AccessStructure, quorumPartyNames []string, acKeyBlob []byte, msgHash []byte, publicKeyCompressed []byte, stage string) ([]byte, error) {
 	if cfg.self >= onlineQuorumCount {
 		log.Printf("party %d skipping %s sign stage; not in online quorum [0 1]", cfg.self, stage)
 		return nil, nil
 	}
 
-	listenAddr := signAddrs[cfg.self]
-	if cfg.self == 1 {
-		// Party 1 only needs to dial party 0 in the two-party online quorum.
-		listenAddr = ""
-	}
-
-	signSession, err := democommon.NewMTLSSession(cfg.self, onlineQuorumCount, listenAddr, signAddrs, tlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create %s sign session: %w", stage, err)
-	}
-	defer func() { _ = signSession.Close() }()
-
-	if err := signSession.WaitForPeers(ctx, otherPartyIndices(cfg.self, onlineQuorumCount)); err != nil {
-		return nil, fmt.Errorf("wait for %s sign peers: %w", stage, err)
-	}
-
-	sigDER, err := mpc.ECDSAMPSignAC(ctx, signSession, acKeyBlob, access, msgHash, signReceiver)
+	signResult, err := democommon.RunECDSAMPACSign(ctx, cfg.self, quorumPartyNames, signAddrs, tlsConfig, access, acKeyBlob, msgHash, publicKeyCompressed, signReceiver)
 	if err != nil {
 		return nil, fmt.Errorf("%s sign ac: %w", stage, err)
 	}
+	sigDER := signResult.SignatureDER
 
 	if cfg.self == signReceiver {
-		if err := verifySecp256k1ECDSASignature(publicKeyCompressed, msgHash, sigDER); err != nil {
-			return nil, fmt.Errorf("%s signature verify: %w", stage, err)
-		}
 		return sigDER, nil
 	}
 
@@ -207,45 +178,6 @@ func maybeRunSignStage(ctx context.Context, cfg config, tlsConfig *tls.Config, s
 		return nil, fmt.Errorf("party %d unexpectedly received %s signature bytes", cfg.self, stage)
 	}
 	return nil, nil
-}
-
-func quorumAccessStructure() (*mpc.AccessStructure, []int) {
-	return &mpc.AccessStructure{
-		Nodes: []mpc.AccessStructureNode{
-			{Type: mpc.AccessNodeLeaf, LeafName: "party0"},
-			{Type: mpc.AccessNodeLeaf, LeafName: "party1"},
-			{Type: mpc.AccessNodeLeaf, LeafName: "party2"},
-			{Type: mpc.AccessNodeThreshold, ThresholdK: 2, Children: []int{0, 1, 2}},
-		},
-		Root: 3,
-	}, []int{0, 1}
-}
-
-func verifySecp256k1ECDSASignature(publicKeyCompressed []byte, msgHash []byte, sigDER []byte) error {
-	publicKey, err := secp256k1.ParsePubKey(publicKeyCompressed)
-	if err != nil {
-		return fmt.Errorf("failed to parse secp256k1 public key: %w", err)
-	}
-	signature, err := secp256k1ecdsa.ParseDERSignature(sigDER)
-	if err != nil {
-		return fmt.Errorf("failed to parse ECDSA DER signature: %w", err)
-	}
-	if !signature.Verify(msgHash, publicKey) {
-		return fmt.Errorf("ECDSA signature verification failed")
-	}
-	return nil
-}
-
-func offsetAddresses(addrs []string, offset int) ([]string, error) {
-	out := make([]string, len(addrs))
-	for i, addr := range addrs {
-		host, port, err := democommon.SplitHostPort(addr)
-		if err != nil {
-			return nil, fmt.Errorf("address %q: %w", addr, err)
-		}
-		out[i] = democommon.JoinHostPort(host, port+offset)
-	}
-	return out, nil
 }
 
 func splitAddresses(raw string) []string {
@@ -257,26 +189,4 @@ func splitAddresses(raw string) []string {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 	return parts
-}
-
-func otherPartyIndices(self, partyCount int) []int {
-	indices := make([]int, 0, partyCount-1)
-	for i := 0; i < partyCount; i++ {
-		if i != self {
-			indices = append(indices, i)
-		}
-	}
-	return indices
-}
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

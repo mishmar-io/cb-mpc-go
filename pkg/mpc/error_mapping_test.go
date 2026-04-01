@@ -11,13 +11,14 @@ import (
 
 func TestWrapPublicError_InvalidCurveIsInvalidParameter(t *testing.T) {
 	sessions := mpctest.NewMockNetwork(2)
+	jobs := test2PJobs("errors/invalid-curve", sessions)
 	t.Cleanup(func() {
 		for _, session := range sessions {
 			_ = session.Close()
 		}
 	})
 
-	_, err := ECDSA2PDKG(context.Background(), sessions[0], Curve(99))
+	_, err := ECDSA2PDKG(context.Background(), jobs[0], Curve(99))
 	if err == nil {
 		t.Fatal("expected error for unsupported curve")
 	}
@@ -101,22 +102,22 @@ func TestWrapPublicError_MapsKeyShareOperationsSeparately(t *testing.T) {
 	}
 }
 
-func TestWrapPublicError_MapsTransportSessionClosed(t *testing.T) {
+func TestWrapPublicError_MapsTransportClosed(t *testing.T) {
 	err := wrapPublicError("demoOp", &cinterop.TransportError{
 		Status: &cinterop.StatusError{
 			Op:      "cbmpc_demo",
 			Code:    cinterop.ErrorCodeNetworkGeneral,
 			Message: "network error",
 		},
-		Cause: cinterop.ErrTransportSessionClosed,
+		Cause: cinterop.ErrTransportClosed,
 	})
 	if err == nil {
 		t.Fatal("expected mapped error")
 	}
-	if !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	if !errors.Is(err, ErrTransportClosed) {
+		t.Fatalf("expected ErrTransportClosed, got %v", err)
 	}
 	if errors.Is(err, ErrNetworkFailure) {
-		t.Fatalf("did not expect ErrNetworkFailure to win over ErrSessionClosed: %v", err)
+		t.Fatalf("did not expect ErrNetworkFailure to win over ErrTransportClosed: %v", err)
 	}
 }

@@ -43,7 +43,7 @@ jobs:
           cache: true
 
       - name: Verify Go modules
-        run: go mod verify
+        run: make verify-mods
 
       - name: Record cb-mpc revision (cache key)
         id: cbmpc
@@ -80,17 +80,8 @@ jobs:
           sudo ln -sf /usr/local/opt/openssl@3.6.1/lib64/libcrypto.a /usr/local/lib/libcrypto.a
           sudo ln -sf /usr/local/opt/openssl@3.6.1/include/openssl /usr/local/include/openssl
 
-      - name: Install golangci-lint
-        shell: bash
-        run: |
-          set -euo pipefail
-          bin_dir="$RUNNER_TEMP/golangci-lint-bin"
-          mkdir -p "$bin_dir"
-          curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$bin_dir" "$GOLANGCI_LINT_VERSION"
-          echo "$bin_dir" >> "$GITHUB_PATH"
-
       - name: Run golangci-lint
-        run: bash scripts/go_with_cpp.sh golangci-lint run ./...
+        run: make lint
 
   vulncheck:
     name: Govulncheck
@@ -115,7 +106,7 @@ jobs:
           cache: true
 
       - name: Verify Go modules
-        run: go mod verify
+        run: make verify-mods
 
       - name: Record cb-mpc revision (cache key)
         id: cbmpc
@@ -155,6 +146,71 @@ jobs:
       - name: Run govulncheck
         run: make vulncheck
 
+  sanitize-go:
+    name: Sanitized CGO boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Audit outbound calls (does not block egress)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Go modules
+        run: make verify-mods
+
+      - name: Record cb-mpc revision (cache key)
+        id: cbmpc
+        shell: bash
+        run: echo "rev=$(git rev-parse HEAD:cb-mpc)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cb-mpc build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            cb-mpc/build
+            cb-mpc/lib
+          key: cbmpc-sanitize-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.cbmpc.outputs.rev }}
+          restore-keys: |
+            cbmpc-sanitize-go-${{ runner.os }}-${{ runner.arch }}-
+            cbmpc-${{ runner.os }}-${{ runner.arch }}-${{ steps.cbmpc.outputs.rev }}
+            cbmpc-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            curl \
+            perl \
+            pkg-config \
+            rsync
+
+      - name: Build custom OpenSSL
+        run: |
+          sudo bash scripts/openssl/build-static-openssl-linux.sh
+          sudo mkdir -p /usr/local/lib64 /usr/local/lib /usr/local/include
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/lib64/libcrypto.a /usr/local/lib64/libcrypto.a
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/lib64/libcrypto.a /usr/local/lib/libcrypto.a
+          sudo ln -sf /usr/local/opt/openssl@3.6.1/include/openssl /usr/local/include/openssl
+
+      - name: Run sanitized CGO boundary tests
+        run: make sanitize-go
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -184,7 +240,7 @@ jobs:
           cache: true
 
       - name: Verify Go modules
-        run: go mod verify
+        run: make verify-mods
 
       - name: Record cb-mpc revision (cache key)
         id: cbmpc

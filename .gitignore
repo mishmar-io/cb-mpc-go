@@ -25,6 +25,9 @@ examples/**/certs/**/*.der
 
 # Demo build artifacts and generated files
 demos/tmp/
+demos/**/tmp/
+demos/ecdsa_mp_ac_web/ecdsa_mp_ac_web
+/ecdsa_mp_ac_web
 demos/**/certs/**/*.pem
 demos/**/certs/**/*.der
 demos/**/certs/**/*.csr

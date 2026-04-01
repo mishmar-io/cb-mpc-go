@@ -14,15 +14,19 @@ type PVEECIESP256HSMECDHCallbacks = cinterop.PVEECIESP256HSMECDHCallbacks
 // PVEBaseKEMCallbacks provides encapsulate/decapsulate hooks for a KEM-based PVE scheme.
 type PVEBaseKEMCallbacks = cinterop.PVEBaseKEMCallbacks
 
-// PVEGenerateBasePKERSAKeypair generates an RSA encryption/decryption keypair for use with PVE.
-func PVEGenerateBasePKERSAKeypair() ([]byte, []byte, error) {
-	ek, dk, err := cinterop.PVEGenerateBasePKERSAKeypair()
+// PVEGenerateBasePKERSAKeypair generates an RSA encryption/decryption keypair
+// for use with PVE, returning the encryption key followed by the decryption
+// key.
+func PVEGenerateBasePKERSAKeypair() (ek []byte, dk []byte, err error) {
+	ek, dk, err = cinterop.PVEGenerateBasePKERSAKeypair()
 	return wrapResult2("PVEGenerateBasePKERSAKeypair", ek, dk, err)
 }
 
-// PVEGenerateBasePKEECIESP256Keypair generates an ECIES-P256 encryption/decryption keypair for use with PVE.
-func PVEGenerateBasePKEECIESP256Keypair() ([]byte, []byte, error) {
-	ek, dk, err := cinterop.PVEGenerateBasePKEECIESP256Keypair()
+// PVEGenerateBasePKEECIESP256Keypair generates an ECIES-P256
+// encryption/decryption keypair for use with PVE, returning the encryption key
+// followed by the decryption key.
+func PVEGenerateBasePKEECIESP256Keypair() (ek []byte, dk []byte, err error) {
+	ek, dk, err = cinterop.PVEGenerateBasePKEECIESP256Keypair()
 	return wrapResult2("PVEGenerateBasePKEECIESP256Keypair", ek, dk, err)
 }
 
@@ -226,7 +230,11 @@ func PVEACVerify(basePKE *PVEBasePKECallbacks, curve Curve, access *AccessStruct
 	return wrapPublicError("PVEACVerify", err)
 }
 
-// PVEACPartyDecryptRow decrypts a single row of an AC PVE ciphertext using a leaf party's decryption key.
+// PVEACPartyDecryptRow decrypts a single row of an AC PVE ciphertext using a
+// leaf party's decryption key.
+//
+// This is the Go wrapper for the stepwise C API call
+// `cbmpc_pve_ac_partial_decrypt_attempt`.
 func PVEACPartyDecryptRow(basePKE *PVEBasePKECallbacks, curve Curve, access *AccessStructure, ciphertext []byte, rowIndex int, leafName string, dk []byte, label []byte) ([]byte, error) {
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
@@ -268,7 +276,10 @@ func PVEACPartyDecryptRowECIESP256HSM(curve Curve, access *AccessStructure, ciph
 	return wrapResult1("PVEACPartyDecryptRowECIESP256HSM", share, err)
 }
 
-// PVEACAggregateToRestoreRow combines per-party decryption shares from a qualified quorum to restore a single row's plaintext.
+// PVEACAggregateToRestoreRow combines per-party decryption shares from a
+// qualified quorum to restore a single row's plaintext.
+//
+// This is the Go wrapper for the stepwise C API call `cbmpc_pve_ac_combine`.
 func PVEACAggregateToRestoreRow(basePKE *PVEBasePKECallbacks, curve Curve, access *AccessStructure, quorumLeafNames []string, quorumShares [][]byte, ciphertext []byte, rowIndex int, label []byte) ([][]byte, error) {
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {

@@ -17,8 +17,23 @@ func main() {
 	defer cancel()
 
 	// mpctest.NewMockNetwork is for local demos/tests only.
+	// This example runs all logical parties in one process for convenience.
+	// Use demos/ for process-isolated, production-like topologies.
 	const parties = 3
 	sessions := mpctest.NewMockNetwork(parties)
+	partyNames := []string{
+		"urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+		"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+		"urn:uuid:3f5d3b64-51d7-58d6-9d8d-3a7e6b1f4032",
+	}
+	jobs := make([]mpc.JobMP, parties)
+	for i := range sessions {
+		jobs[i] = mpc.JobMP{
+			Self:       i,
+			PartyNames: append([]string(nil), partyNames...),
+			Transport:  sessions[i],
+		}
+	}
 	closeSessions := sync.OnceFunc(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -44,7 +59,7 @@ func main() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			publicKey, shares, privateShare, _, err := mpc.TDH2DKGAdditive(ctx, sessions[idx], mpc.CurveP256)
+			publicKey, shares, privateShare, _, err := mpc.TDH2DKGAdditive(ctx, jobs[idx], mpc.CurveP256)
 			if err != nil {
 				errCh <- fmt.Errorf("party %d dkg: %w", idx, err)
 				return

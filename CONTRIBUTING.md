@@ -29,6 +29,7 @@ Use the repository scripts and Makefile so CGO points at the public install pref
 make deps
 make build
 make test
+make sanitize-go
 make lint
 make vulncheck
 make examples
@@ -39,7 +40,13 @@ If you run Go commands directly, use:
 
 ```bash
 bash scripts/go_with_cpp.sh go test ./...
+bash scripts/go_with_cpp.sh go -C demos/ecdsa_mp_ac_web test ./...
 ```
+
+The root `go test ./...` and `go build ./...` patterns do not cross nested
+module boundaries, so `make build`, `make test`, and `make lint` are the
+safest full-repository entry points now that `demos/ecdsa_mp_ac_web` is an
+isolated demo module.
 
 The repository keeps:
 

@@ -17,6 +17,12 @@ const (
 	tdh2PartyCount = 3
 )
 
+var demoPartyNames = []string{
+	"urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+	"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+	"urn:uuid:3f5d3b64-51d7-58d6-9d8d-3a7e6b1f4032",
+}
+
 type config struct {
 	self       int
 	listenAddr string
@@ -44,30 +50,35 @@ func main() {
 		log.Fatalf("load TLS config: %v", err)
 	}
 
-	session, err := democommon.NewMTLSSession(cfg.self, len(cfg.partyAddrs), cfg.listenAddr, cfg.partyAddrs, tlsConfig)
+	transport, err := democommon.NewMTLSTransport(cfg.self, len(cfg.partyAddrs), cfg.listenAddr, cfg.partyAddrs, tlsConfig)
 	if err != nil {
-		log.Fatalf("create mTLS session: %v", err)
+		log.Fatalf("create mTLS transport: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() { _ = transport.Close() }()
 
 	peers := otherPartyIndices(cfg.self, len(cfg.partyAddrs))
-	if err := session.WaitForPeers(ctx, peers); err != nil {
+	if err := transport.WaitForPeers(ctx, peers); err != nil {
 		log.Fatalf("wait for peers: %v", err)
 	}
 	log.Printf("party %d connected to peers %v", cfg.self, peers)
 
-	publicKey, publicShares, privateShare, sidOut, err := mpc.TDH2DKGAdditive(ctx, session, mpc.CurveP256)
+	job := mpc.JobMP{
+		Self:       cfg.self,
+		PartyNames: append([]string(nil), demoPartyNames...),
+		Transport:  transport,
+	}
+	publicKey, publicShares, privateShare, sidOut, err := mpc.TDH2DKGAdditive(ctx, job, mpc.CurveP256)
 	if err != nil {
 		log.Fatalf("tdh2 dkg additive: %v", err)
 	}
 	log.Printf("party %d DKG complete: public key bytes=%d sid bytes=%d", cfg.self, len(publicKey), len(sidOut))
 
 	if cfg.self == 0 {
-		if err := runCoordinatorTDH2Flow(ctx, session, publicKey, publicShares, privateShare); err != nil {
+		if err := runCoordinatorTDH2Flow(ctx, transport, publicKey, publicShares, privateShare); err != nil {
 			log.Fatalf("coordinator flow: %v", err)
 		}
 	} else {
-		if err := runParticipantTDH2Flow(ctx, session, cfg.self, publicKey, privateShare); err != nil {
+		if err := runParticipantTDH2Flow(ctx, transport, cfg.self, publicKey, privateShare); err != nil {
 			log.Fatalf("participant flow: %v", err)
 		}
 	}
@@ -116,7 +127,7 @@ func parseConfig() config {
 	return cfg
 }
 
-func runCoordinatorTDH2Flow(ctx context.Context, session *democommon.MTLSSession, publicKey []byte, publicShares [][]byte, privateShare []byte) error {
+func runCoordinatorTDH2Flow(ctx context.Context, transport *democommon.MTLSTransport, publicKey []byte, publicShares [][]byte, privateShare []byte) error {
 	plaintext := []byte("cb-mpc-go tdh2 mTLS demo payload")
 	label := []byte("cb-mpc-go:tdh2-mtls-demo")
 
@@ -141,7 +152,7 @@ func runCoordinatorTDH2Flow(ctx context.Context, session *democommon.MTLSSession
 		return fmt.Errorf("marshal request: %w", err)
 	}
 	for _, peer := range []int{1, 2} {
-		if err := session.Send(ctx, peer, request); err != nil {
+		if err := transport.Send(ctx, peer, request); err != nil {
 			return fmt.Errorf("send ciphertext to party %d: %w", peer, err)
 		}
 	}
@@ -149,7 +160,7 @@ func runCoordinatorTDH2Flow(ctx context.Context, session *democommon.MTLSSession
 	partials := make([][]byte, len(publicShares))
 	partials[0] = ownPartial
 	for _, peer := range []int{1, 2} {
-		msg, err := session.Receive(ctx, peer)
+		msg, err := transport.Receive(ctx, peer)
 		if err != nil {
 			return fmt.Errorf("receive partial from party %d: %w", peer, err)
 		}
@@ -174,8 +185,8 @@ func runCoordinatorTDH2Flow(ctx context.Context, session *democommon.MTLSSession
 	return nil
 }
 
-func runParticipantTDH2Flow(ctx context.Context, session *democommon.MTLSSession, self int, publicKey []byte, privateShare []byte) error {
-	msg, err := session.Receive(ctx, 0)
+func runParticipantTDH2Flow(ctx context.Context, transport *democommon.MTLSTransport, self int, publicKey []byte, privateShare []byte) error {
+	msg, err := transport.Receive(ctx, 0)
 	if err != nil {
 		return fmt.Errorf("receive ciphertext from party 0: %w", err)
 	}
@@ -201,7 +212,7 @@ func runParticipantTDH2Flow(ctx context.Context, session *democommon.MTLSSession
 	if err != nil {
 		return fmt.Errorf("marshal partial: %w", err)
 	}
-	if err := session.Send(ctx, 0, response); err != nil {
+	if err := transport.Send(ctx, 0, response); err != nil {
 		return fmt.Errorf("send partial to party 0: %w", err)
 	}
 	log.Printf("party %d sent partial bytes=%d", self, len(partial))

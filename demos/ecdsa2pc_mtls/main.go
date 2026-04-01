@@ -32,30 +32,41 @@ func main() {
 		clientAddrs[0] = cfg.peerAddr
 	}
 
-	session, err := democommon.NewMTLSSession(cfg.self, partyCount, cfg.listenAddr, clientAddrs, tlsConfig)
+	transport, err := democommon.NewMTLSTransport(cfg.self, partyCount, cfg.listenAddr, clientAddrs, tlsConfig)
 	if err != nil {
-		log.Fatalf("create mTLS session: %v", err)
+		log.Fatalf("create mTLS transport: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() { _ = transport.Close() }()
 
 	peer := 1 - cfg.self
-	if err := session.WaitForPeers(ctx, []int{peer}); err != nil {
+	if err := transport.WaitForPeers(ctx, []int{peer}); err != nil {
 		log.Fatalf("wait for peer %d: %v", peer, err)
 	}
 	log.Printf("party %d connected to peer %d", cfg.self, peer)
 
-	keyBlob, err := mpc.ECDSA2PDKG(ctx, session, mpc.CurveSecp256k1)
+	job := mpc.Job2P{
+		P1Name:    "urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+		P2Name:    "urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+		Transport: transport,
+	}
+	if cfg.self == 0 {
+		job.Self = mpc.TwoPartyP1
+	} else {
+		job.Self = mpc.TwoPartyP2
+	}
+
+	keyBlob, err := mpc.ECDSA2PDKG(ctx, job, mpc.CurveSecp256k1)
 	if err != nil {
 		log.Fatalf("party %d dkg: %v", cfg.self, err)
 	}
 
 	hash := sha256.Sum256([]byte("cb-mpc-go ecdsa2pc mTLS demo"))
-	sidOut, sigDER, err := mpc.ECDSA2PSign(ctx, session, keyBlob, hash[:], nil)
+	sidOut, sigDER, err := mpc.ECDSA2PSign(ctx, job, keyBlob, hash[:], nil)
 	if err != nil {
 		log.Fatalf("party %d sign: %v", cfg.self, err)
 	}
 
-	refreshedKeyBlob, err := mpc.ECDSA2PRefresh(ctx, session, keyBlob)
+	refreshedKeyBlob, err := mpc.ECDSA2PRefresh(ctx, job, keyBlob)
 	if err != nil {
 		log.Fatalf("party %d refresh: %v", cfg.self, err)
 	}

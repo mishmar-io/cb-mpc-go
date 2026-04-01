@@ -6,18 +6,37 @@ import (
 	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
 )
 
-// TDH2DKGAdditive performs multi-party distributed key generation for TDH2 threshold encryption with additive shares.
-func TDH2DKGAdditive(ctx context.Context, session Session, curve Curve) ([]byte, [][]byte, []byte, []byte, error) {
+// TDH2DKGAdditive performs multi-party distributed key generation for TDH2
+// threshold encryption with additive shares.
+//
+// It returns the joint public key, all public shares, this party's private
+// share, and the output session ID.
+func TDH2DKGAdditive(ctx context.Context, job JobMP, curve Curve) (publicKey []byte, publicShares [][]byte, privateShare []byte, sidOut []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAdditive", err)
+	}
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
 		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAdditive", err)
 	}
-	publicKey, publicShares, privateShare, sidOut, err := cinterop.TDH2DKGAdditive(ctx, session, cgoCurve)
+	publicKey, publicShares, privateShare, sidOut, err = cinterop.TDH2DKGAdditive(ctx, cgoJob, cgoCurve)
 	return wrapResult4("TDH2DKGAdditive", publicKey, publicShares, privateShare, sidOut, err)
 }
 
-// TDH2DKGAC performs multi-party TDH2 DKG governed by an access-structure quorum policy.
-func TDH2DKGAC(ctx context.Context, session Session, curve Curve, sidIn []byte, access *AccessStructure, quorumPartyIndices []int) ([]byte, [][]byte, []byte, []byte, error) {
+// TDH2DKGAC performs multi-party TDH2 DKG governed by an access-structure
+// quorum policy.
+//
+// It returns the joint public key, all public shares, this party's private
+// share, and the output session ID.
+func TDH2DKGAC(ctx context.Context, job JobMP, curve Curve, sidIn []byte, access *AccessStructure, quorumPartyNames []string) (publicKey []byte, publicShares [][]byte, privateShare []byte, sidOut []byte, err error) {
+	cgoJob, err := toCGOJobMP(job)
+	if err != nil {
+		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAC", err)
+	}
+	if err := validatePartyNameSubset("quorumPartyNames", job.PartyNames, quorumPartyNames); err != nil {
+		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAC", err)
+	}
 	cgoCurve, err := toCGOCurve(curve)
 	if err != nil {
 		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAC", err)
@@ -26,7 +45,7 @@ func TDH2DKGAC(ctx context.Context, session Session, curve Curve, sidIn []byte, 
 	if err != nil {
 		return nil, nil, nil, nil, wrapPublicError("TDH2DKGAC", err)
 	}
-	publicKey, publicShares, privateShare, sidOut, err := cinterop.TDH2DKGAC(ctx, session, cgoCurve, sidIn, cgoAccess, quorumPartyIndices)
+	publicKey, publicShares, privateShare, sidOut, err = cinterop.TDH2DKGAC(ctx, cgoJob, cgoCurve, sidIn, cgoAccess, quorumPartyNames)
 	return wrapResult4("TDH2DKGAC", publicKey, publicShares, privateShare, sidOut, err)
 }
 
@@ -56,6 +75,12 @@ func TDH2CombineAdditive(publicKey []byte, publicShares [][]byte, label []byte, 
 
 // TDH2CombineAC combines partial decryptions from a qualified quorum under an access-structure policy to recover the plaintext.
 func TDH2CombineAC(access *AccessStructure, publicKey []byte, partyNames []string, publicShares [][]byte, label []byte, partialPartyNames []string, partialDecryptions [][]byte, ciphertext []byte) ([]byte, error) {
+	if err := validatePartyNames("partyNames", partyNames); err != nil {
+		return nil, wrapPublicError("TDH2CombineAC", err)
+	}
+	if err := validatePartyNameSubset("partialPartyNames", partyNames, partialPartyNames); err != nil {
+		return nil, wrapPublicError("TDH2CombineAC", err)
+	}
 	cgoAccess, err := toCGOAccessStructure(access)
 	if err != nil {
 		return nil, wrapPublicError("TDH2CombineAC", err)

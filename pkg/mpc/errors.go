@@ -27,8 +27,12 @@ var (
 	// ErrInvalidKeyShare indicates the key share is invalid or corrupted
 	ErrInvalidKeyShare = errors.New("mpc: invalid key share")
 
-	// ErrSessionClosed indicates the session has been closed
-	ErrSessionClosed = errors.New("mpc: session closed")
+	// ErrTransportClosed indicates the transport has been closed.
+	ErrTransportClosed = errors.New("mpc: transport closed")
+
+	// ErrSessionClosed is kept as an alias for backward recognition of the
+	// previous transport abstraction name.
+	ErrSessionClosed = ErrTransportClosed
 )
 
 // Error wraps an underlying error with context
@@ -109,8 +113,8 @@ func wrapPublicError(op string, err error) error {
 }
 
 func categoryForError(op string, err error) error {
-	if errors.Is(err, cinterop.ErrTransportSessionClosed) {
-		return ErrSessionClosed
+	if errors.Is(err, cinterop.ErrTransportClosed) {
+		return ErrTransportClosed
 	}
 
 	var statusErr *cinterop.StatusError
@@ -150,8 +154,8 @@ func categoryForError(op string, err error) error {
 		return ErrProtocolFailure
 	case errors.Is(err, ErrInvalidSignature):
 		return ErrInvalidSignature
-	case errors.Is(err, ErrSessionClosed):
-		return ErrSessionClosed
+	case errors.Is(err, ErrTransportClosed):
+		return ErrTransportClosed
 	default:
 		return nil
 	}

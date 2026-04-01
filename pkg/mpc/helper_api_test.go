@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
@@ -115,6 +116,7 @@ func TestHelperAPIs(t *testing.T) {
 			ErrProtocolFailure,
 			ErrInvalidSignature,
 			ErrInvalidKeyShare,
+			ErrTransportClosed,
 			ErrSessionClosed,
 		} {
 			if err == nil {
@@ -123,18 +125,122 @@ func TestHelperAPIs(t *testing.T) {
 		}
 	})
 
-	t.Run("session interface methods", func(t *testing.T) {
+	t.Run("transport interface methods", func(t *testing.T) {
 		sessions := mpctest.NewMockNetwork(2)
-		var session Session = sessions[1]
-		if got, want := session.MyIndex(), 1; got != want {
-			t.Fatalf("Session.MyIndex mismatch: got=%d want=%d", got, want)
-		}
-		if got, want := session.PartyCount(), 2; got != want {
-			t.Fatalf("Session.PartyCount mismatch: got=%d want=%d", got, want)
-		}
-		if err := session.Close(); err != nil {
-			t.Fatalf("Session.Close returned error: %v", err)
+		var transport Transport = sessions[1]
+		if err := transport.Close(); err != nil {
+			t.Fatalf("Transport.Close returned error: %v", err)
 		}
 		_ = sessions[0].Close()
+	})
+
+	t.Run("party name helpers", func(t *testing.T) {
+		partyNames := scopedNames("test:helper-api", "alice", "bob", "carol")
+		selected, err := PartyNamesFromIndices(partyNames, []int{0, 2})
+		if err != nil {
+			t.Fatalf("PartyNamesFromIndices returned error: %v", err)
+		}
+		if got := strings.Join(selected, ","); got != partyNames[0]+","+partyNames[2] {
+			t.Fatalf("PartyNamesFromIndices mismatch: got=%v", selected)
+		}
+	})
+
+	t.Run("job validation rejects placeholder and endpoint names", func(t *testing.T) {
+		transports := mpctest.NewMockNetwork(3)
+		t.Cleanup(func() {
+			for _, transport := range transports {
+				_ = transport.Close()
+			}
+		})
+
+		err := validateJob2P(Job2P{
+			Self:      TwoPartyP1,
+			P1Name:    "party0",
+			P2Name:    "urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+			Transport: transports[0],
+		})
+		if err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid placeholder party name error, got %v", err)
+		}
+
+		err = validateJobMP(JobMP{
+			Self: 0,
+			PartyNames: []string{
+				"127.0.0.1:9440",
+				"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+				"urn:uuid:3f5d3b64-51d7-58d6-9d8d-3a7e6b1f4032",
+			},
+			Transport: transports[0],
+		})
+		if err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid endpoint party name error, got %v", err)
+		}
+	})
+
+	t.Run("access structure leaf names reject placeholder and endpoint names", func(t *testing.T) {
+		placeholderAccess := &AccessStructure{
+			Nodes: []AccessStructureNode{
+				{Type: AccessNodeLeaf, LeafName: "party0"},
+				{Type: AccessNodeThreshold, ThresholdK: 1, Children: []int{0}},
+			},
+			Root: 1,
+		}
+		if _, err := toCGOAccessStructure(placeholderAccess); err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid placeholder leaf name error, got %v", err)
+		}
+
+		endpointAccess := &AccessStructure{
+			Nodes: []AccessStructureNode{
+				{Type: AccessNodeLeaf, LeafName: "127.0.0.1:9440"},
+				{Type: AccessNodeThreshold, ThresholdK: 1, Children: []int{0}},
+			},
+			Root: 1,
+		}
+		if _, err := toCGOAccessStructure(endpointAccess); err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid endpoint leaf name error, got %v", err)
+		}
+	})
+
+	t.Run("tdh2 combine ac rejects invalid identity names", func(t *testing.T) {
+		partyNames := []string{
+			scopedUUIDName("test:tdh2-combine-ac", "alice"),
+			scopedUUIDName("test:tdh2-combine-ac", "bob"),
+		}
+		access := &AccessStructure{
+			Nodes: []AccessStructureNode{
+				{Type: AccessNodeLeaf, LeafName: partyNames[0]},
+				{Type: AccessNodeLeaf, LeafName: partyNames[1]},
+				{Type: AccessNodeThreshold, ThresholdK: 1, Children: []int{0, 1}},
+			},
+			Root: 2,
+		}
+
+		_, err := TDH2CombineAC(
+			access,
+			nil,
+			[]string{"127.0.0.1:9440", partyNames[1]},
+			[][]byte{nil, nil},
+			nil,
+			[]string{partyNames[1]},
+			[][]byte{nil},
+			nil,
+		)
+		if err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid full roster party name error, got %v", err)
+		}
+
+		_, err = TDH2CombineAC(
+			access,
+			nil,
+			partyNames,
+			[][]byte{nil, nil},
+			nil,
+			[]string{"party0"},
+			[][]byte{nil},
+			nil,
+		)
+		if err == nil || !errors.Is(err, ErrInvalidParameter) {
+			t.Fatalf("expected invalid partial party name error, got %v", err)
+		}
 	})
 }

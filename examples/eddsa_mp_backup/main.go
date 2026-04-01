@@ -21,6 +21,12 @@ const (
 	backupTimeout = 60 * time.Second
 )
 
+var signerNames = []string{
+	"urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+	"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+	"urn:uuid:3f5d3b64-51d7-58d6-9d8d-3a7e6b1f4032",
+}
+
 type backedUpKey struct {
 	partyKeyBlobs [][]byte
 	publicKey     []byte
@@ -58,7 +64,7 @@ func main() {
 	sensitiveDetachedScalars := mpc.SensitiveSlices(detachedScalars)
 	defer func() { _ = sensitiveDetachedScalars.Close() }()
 
-	label := []byte("cb-mpc-go:eddsa-mp-backup:party0")
+	label := []byte("cb-mpc-go:eddsa-mp-backup:restored-signer-2f4b567e")
 	ciphertext, err := mpc.PVEACEncrypt(nil, mpc.CurveEd25519, access, backupLeafNames, backupEKs, label, sensitiveDetachedScalars.Bytes())
 	if err != nil {
 		log.Fatalf("encrypt detached scalars: %v", err)
@@ -119,7 +125,11 @@ func main() {
 }
 
 func backupAccessStructure() (*mpc.AccessStructure, []string, []int) {
-	leafNames := []string{"backup0", "backup1", "backup2"}
+	leafNames := []string{
+		"urn:uuid:54bc82b4-4e56-55ae-b858-d6206a654613",
+		"urn:uuid:0f4c3f34-28e2-5259-9800-0d3f3be8f9ef",
+		"urn:uuid:813f1a5f-53c9-549e-8d16-c2c5a193f357",
+	}
 	return &mpc.AccessStructure{
 		Nodes: []mpc.AccessStructureNode{
 			{Type: mpc.AccessNodeLeaf, LeafName: leafNames[0]},
@@ -132,13 +142,23 @@ func backupAccessStructure() (*mpc.AccessStructure, []string, []int) {
 }
 
 func generateBackupableKey(ctx context.Context, keyIdx int) (backedUpKey, []byte, error) {
+	// This helper runs all logical parties in one process for zero-setup local
+	// demonstration. Use demos/ for process-isolated, production-like flows.
 	sessions := mpctest.NewMockNetwork(signerCount)
+	jobs := make([]mpc.JobMP, signerCount)
+	for i := range sessions {
+		jobs[i] = mpc.JobMP{
+			Self:       i,
+			PartyNames: append([]string(nil), signerNames...),
+			Transport:  sessions[i],
+		}
+	}
 	defer closeSessions(sessions)
 
 	keyBlobs := make([][]byte, signerCount)
 	sidOuts := make([][]byte, signerCount)
 	if err := runPerParty(sessions, func(idx int) error {
-		keyBlob, sidOut, err := mpc.EdDSAMPDKGAdditive(ctx, sessions[idx], mpc.CurveEd25519)
+		keyBlob, sidOut, err := mpc.EdDSAMPDKGAdditive(ctx, jobs[idx], mpc.CurveEd25519)
 		if err != nil {
 			return fmt.Errorf("party %d dkg additive: %w", idx, err)
 		}
@@ -184,7 +204,17 @@ func generateBackupableKey(ctx context.Context, keyIdx int) (backedUpKey, []byte
 }
 
 func signWithRestoredKey(ctx context.Context, msg []byte, originalPartyKeyBlobs [][]byte, restoredParty0KeyBlob []byte) ([]byte, error) {
+	// This helper runs all logical parties in one process for zero-setup local
+	// demonstration. Use demos/ for process-isolated, production-like flows.
 	sessions := mpctest.NewMockNetwork(signerCount)
+	jobs := make([]mpc.JobMP, signerCount)
+	for i := range sessions {
+		jobs[i] = mpc.JobMP{
+			Self:       i,
+			PartyNames: append([]string(nil), signerNames...),
+			Transport:  sessions[i],
+		}
+	}
 	defer closeSessions(sessions)
 
 	signatures := make([][]byte, signerCount)
@@ -193,7 +223,7 @@ func signWithRestoredKey(ctx context.Context, msg []byte, originalPartyKeyBlobs 
 		if idx == 0 {
 			keyBlob = restoredParty0KeyBlob
 		}
-		sig, err := mpc.EdDSAMPSignAdditive(ctx, sessions[idx], keyBlob, msg, signReceiver)
+		sig, err := mpc.EdDSAMPSignAdditive(ctx, jobs[idx], keyBlob, msg, signReceiver)
 		if err != nil {
 			return fmt.Errorf("party %d sign additive: %w", idx, err)
 		}
@@ -205,7 +235,7 @@ func signWithRestoredKey(ctx context.Context, msg []byte, originalPartyKeyBlobs 
 	return requireSignatureOnlyOnReceiver(signatures, signReceiver)
 }
 
-func runPerParty(sessions []*mpctest.MockSession, fn func(idx int) error) error {
+func runPerParty(sessions []*mpctest.MockTransport, fn func(idx int) error) error {
 	errCh := make(chan error, len(sessions))
 	var wg sync.WaitGroup
 	for i := range sessions {
@@ -225,7 +255,7 @@ func runPerParty(sessions []*mpctest.MockSession, fn func(idx int) error) error 
 	return nil
 }
 
-func closeSessions(sessions []*mpctest.MockSession) {
+func closeSessions(sessions []*mpctest.MockTransport) {
 	for _, session := range sessions {
 		_ = session.Close()
 	}

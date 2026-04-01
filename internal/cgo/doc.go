@@ -10,7 +10,7 @@
 //
 // 4. Error handling: Convert cbmpc_error_t values to Go errors immediately.
 //
-//  5. Session callback bridge: Interactive protocols pass through cbmpc_transport_t
+//  5. Transport callback bridge: Interactive protocols pass through cbmpc_transport_t
 //     using exported Go callbacks.
 //
 // # Threading

@@ -19,15 +19,59 @@ import (
 // This prevents a malicious peer from causing OOM via a large length prefix.
 const maxMessageSize = 64 * 1024 * 1024
 
-// MTLSSession is a reference mTLS-backed Session implementation for local demos.
+var demoPeerLabels = []string{
+	"alpha",
+	"bravo",
+	"charlie",
+	"delta",
+	"echo",
+	"foxtrot",
+	"golf",
+	"hotel",
+	"india",
+	"juliet",
+	"kilo",
+	"lima",
+	"mike",
+	"november",
+	"oscar",
+	"papa",
+	"quebec",
+	"romeo",
+	"sierra",
+	"tango",
+	"uniform",
+	"victor",
+	"whiskey",
+	"xray",
+	"yankee",
+	"zulu",
+}
+
+func demoPeerNames(count int) ([]string, error) {
+	if count < 0 {
+		return nil, fmt.Errorf("partyCount must be non-negative, got %d", count)
+	}
+	if count > len(demoPeerLabels) {
+		return nil, fmt.Errorf("partyCount %d exceeds demo peer identity limit %d", count, len(demoPeerLabels))
+	}
+	names := make([]string, count)
+	for i := 0; i < count; i++ {
+		names[i] = fmt.Sprintf("peer-%s.demo.cbmpc.local", demoPeerLabels[i])
+	}
+	return names, nil
+}
+
+// MTLSTransport is a reference mTLS-backed transport implementation for local demos.
 //
 // It supports a local full-mesh topology where each party may listen on its own
 // address and parties dial lower-index peers to avoid duplicate connections.
-// It is intended to demonstrate how callers can satisfy the mpc.Session
+// It is intended to demonstrate how callers can satisfy the mpc.Transport
 // contract over TCP+mTLS, not to serve as a production-ready transport stack.
-type MTLSSession struct {
+type MTLSTransport struct {
 	myIndex    int
 	partyCount int
+	peerNames  []string
 
 	listener  net.Listener
 	clients   []net.Conn
@@ -42,7 +86,7 @@ type MTLSSession struct {
 	mu     sync.Mutex
 }
 
-// NewMTLSSession creates a new local demo mTLS session.
+// NewMTLSTransport creates a new local demo mTLS transport.
 //
 // The caller provides:
 //   - listenAddr for this party, if this party should accept inbound peer connections
@@ -52,9 +96,10 @@ type MTLSSession struct {
 // than their own.
 //
 // This helper assumes a demo PKI model where peer identities are encoded as
-// party<N> certificate names and where clients may verify against localhost-like
-// names for loopback testing.
-func NewMTLSSession(myIndex, partyCount int, listenAddr string, partyAddrs []string, tlsConfig *tls.Config) (*MTLSSession, error) {
+// deterministic non-numeric certificate names such as
+// `peer-alpha.demo.cbmpc.local`, while clients still verify servers against the
+// shared `localhost` loopback SAN.
+func NewMTLSTransport(myIndex, partyCount int, listenAddr string, partyAddrs []string, tlsConfig *tls.Config) (*MTLSTransport, error) {
 	if tlsConfig == nil {
 		return nil, fmt.Errorf("tlsConfig cannot be nil")
 	}
@@ -75,11 +120,16 @@ func NewMTLSSession(myIndex, partyCount int, listenAddr string, partyAddrs []str
 			return nil, fmt.Errorf("partyAddrs[%d] is required for party %d to dial lower-index peers", peer, myIndex)
 		}
 	}
+	peerNames, err := demoPeerNames(partyCount)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	session := &MTLSSession{
+	session := &MTLSTransport{
 		myIndex:       myIndex,
 		partyCount:    partyCount,
+		peerNames:     peerNames,
 		clients:       make([]net.Conn, partyCount),
 		writeMu:       make([]sync.Mutex, partyCount),
 		messageQueues: make([]chan []byte, partyCount),
@@ -105,7 +155,7 @@ func NewMTLSSession(myIndex, partyCount int, listenAddr string, partyAddrs []str
 }
 
 // WaitForPeers blocks until connections to the requested peers are available.
-func (s *MTLSSession) WaitForPeers(ctx context.Context, peers []int) error {
+func (s *MTLSTransport) WaitForPeers(ctx context.Context, peers []int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -149,7 +199,7 @@ func (s *MTLSSession) WaitForPeers(ctx context.Context, peers []int) error {
 	}
 }
 
-func (s *MTLSSession) acceptConnections() {
+func (s *MTLSTransport) acceptConnections() {
 	defer s.listener.Close()
 
 	for {
@@ -174,7 +224,7 @@ func (s *MTLSSession) acceptConnections() {
 	}
 }
 
-func (s *MTLSSession) connectToParties(partyAddrs []string, tlsConfig *tls.Config) {
+func (s *MTLSTransport) connectToParties(partyAddrs []string, tlsConfig *tls.Config) {
 	for i, addr := range partyAddrs {
 		if i >= s.myIndex || addr == "" {
 			continue
@@ -213,7 +263,7 @@ func (s *MTLSSession) connectToParties(partyAddrs []string, tlsConfig *tls.Confi
 	}
 }
 
-func (s *MTLSSession) peerPartyIndex(conn net.Conn) (int, error) {
+func (s *MTLSTransport) peerPartyIndex(conn net.Conn) (int, error) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
 		return -1, fmt.Errorf("expected TLS connection, got %T", conn)
@@ -235,26 +285,21 @@ func (s *MTLSSession) peerPartyIndex(conn net.Conn) (int, error) {
 	}
 
 	for _, name := range candidates {
-		if !strings.HasPrefix(name, "party") {
-			continue
+		for idx, expected := range s.peerNames {
+			if name != expected {
+				continue
+			}
+			if idx == s.myIndex {
+				return -1, fmt.Errorf("peer identity %q matches local index", name)
+			}
+			return idx, nil
 		}
-		var idx int
-		if _, err := fmt.Sscanf(name, "party%d", &idx); err != nil {
-			continue
-		}
-		if idx < 0 || idx >= s.partyCount {
-			return -1, fmt.Errorf("peer party index %d out of range [0, %d)", idx, s.partyCount)
-		}
-		if idx == s.myIndex {
-			return -1, fmt.Errorf("peer party index %d matches local index", idx)
-		}
-		return idx, nil
 	}
 
-	return -1, fmt.Errorf("unable to derive peer party index from certificate (CN=%q DNSNames=%v)", cert.Subject.CommonName, cert.DNSNames)
+	return -1, fmt.Errorf("unable to derive peer identity from certificate (expected one of %v, CN=%q DNSNames=%v)", s.peerNames, cert.Subject.CommonName, cert.DNSNames)
 }
 
-func (s *MTLSSession) handleConnection(conn net.Conn) {
+func (s *MTLSTransport) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	peerIndex, err := s.peerPartyIndex(conn)
@@ -304,7 +349,7 @@ func (s *MTLSSession) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *MTLSSession) registerPeerConn(peerIndex int, conn net.Conn) bool {
+func (s *MTLSTransport) registerPeerConn(peerIndex int, conn net.Conn) bool {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 
@@ -331,8 +376,8 @@ func isExpectedCloseError(err error) bool {
 	return errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
 }
 
-// Send implements mpc.Session.
-func (s *MTLSSession) Send(ctx context.Context, toParty int, msg []byte) error {
+// Send implements mpc.Transport.
+func (s *MTLSTransport) Send(ctx context.Context, toParty int, msg []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -378,8 +423,8 @@ func (s *MTLSSession) Send(ctx context.Context, toParty int, msg []byte) error {
 	return nil
 }
 
-// Receive implements mpc.Session.
-func (s *MTLSSession) Receive(ctx context.Context, fromParty int) ([]byte, error) {
+// Receive implements mpc.Transport.
+func (s *MTLSTransport) Receive(ctx context.Context, fromParty int) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -397,8 +442,8 @@ func (s *MTLSSession) Receive(ctx context.Context, fromParty int) ([]byte, error
 	}
 }
 
-// ReceiveAll implements mpc.Session.
-func (s *MTLSSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
+// ReceiveAll implements mpc.Transport.
+func (s *MTLSTransport) ReceiveAll(ctx context.Context, fromParties []int) ([][]byte, error) {
 	results := make([][]byte, len(fromParties))
 	for i, party := range fromParties {
 		msg, err := s.Receive(ctx, party)
@@ -410,18 +455,18 @@ func (s *MTLSSession) ReceiveAll(ctx context.Context, fromParties []int) ([][]by
 	return results, nil
 }
 
-// MyIndex implements mpc.Session.
-func (s *MTLSSession) MyIndex() int {
+// MyIndex returns this transport's local party index.
+func (s *MTLSTransport) MyIndex() int {
 	return s.myIndex
 }
 
-// PartyCount implements mpc.Session.
-func (s *MTLSSession) PartyCount() int {
+// PartyCount returns the total number of parties wired into this transport.
+func (s *MTLSTransport) PartyCount() int {
 	return s.partyCount
 }
 
-// Close implements mpc.Session.
-func (s *MTLSSession) Close() error {
+// Close implements mpc.Transport.
+func (s *MTLSTransport) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

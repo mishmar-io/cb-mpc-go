@@ -6,6 +6,44 @@ import (
 	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
 )
 
+func toCGOTwoPartySelf(self TwoPartySelf) (cinterop.TwoPartySelf, error) {
+	switch self {
+	case TwoPartyP1:
+		return cinterop.TwoPartyP1, nil
+	case TwoPartyP2:
+		return cinterop.TwoPartyP2, nil
+	default:
+		return 0, invalidParameterErrorf("invalid two-party self %d", int32(self))
+	}
+}
+
+func toCGOJob2P(job Job2P) (cinterop.Job2P, error) {
+	if err := validateJob2P(job); err != nil {
+		return cinterop.Job2P{}, err
+	}
+	self, err := toCGOTwoPartySelf(job.Self)
+	if err != nil {
+		return cinterop.Job2P{}, err
+	}
+	return cinterop.Job2P{
+		Self:      self,
+		P1Name:    job.P1Name,
+		P2Name:    job.P2Name,
+		Transport: job.Transport,
+	}, nil
+}
+
+func toCGOJobMP(job JobMP) (cinterop.JobMP, error) {
+	if err := validateJobMP(job); err != nil {
+		return cinterop.JobMP{}, err
+	}
+	return cinterop.JobMP{
+		Self:       job.Self,
+		PartyNames: append([]string(nil), job.PartyNames...),
+		Transport:  job.Transport,
+	}, nil
+}
+
 func toCGOCurve(curve Curve) (cinterop.CurveID, error) {
 	switch curve {
 	case CurveP256:
@@ -34,6 +72,9 @@ func toCGOAccessStructure(access *AccessStructure) (*cinterop.AccessStructure, e
 	}
 	if access.Root < 0 || access.Root >= len(access.Nodes) {
 		return nil, invalidParameterErrorf("access structure root index %d out of range [0, %d)", access.Root, len(access.Nodes))
+	}
+	if err := validateAccessStructureLeafNames(access); err != nil {
+		return nil, err
 	}
 	nodes := make([]cinterop.AccessStructureNode, len(access.Nodes))
 	for i, node := range access.Nodes {

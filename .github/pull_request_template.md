@@ -4,7 +4,7 @@
 
 ## Testing
 
-- [ ] `bash scripts/go_with_cpp.sh go test ./...`
+- [ ] `make test`
 - [ ] `make examples`
 - [ ] Relevant `make demo-*` workflow, if applicable
 

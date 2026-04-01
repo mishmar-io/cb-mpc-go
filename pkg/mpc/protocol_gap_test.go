@@ -14,11 +14,12 @@ func TestProtocolGapCoverage(t *testing.T) {
 	t.Run("eddsa 2p refresh", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(2)
+		jobs := test2PJobs("protocol-gap/eddsa-2p-refresh", sessions)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := EdDSA2PDKG(ctx, sessions[idx], CurveEd25519)
+			keyBlob, err := EdDSA2PDKG(ctx, jobs[idx], CurveEd25519)
 			if err != nil {
 				return fmt.Errorf("dkg: %w", err)
 			}
@@ -38,7 +39,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 
 		refreshed := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := EdDSA2PRefresh(ctx, sessions[idx], keyBlobs[idx])
+			keyBlob, err := EdDSA2PRefresh(ctx, jobs[idx], keyBlobs[idx])
 			if err != nil {
 				return fmt.Errorf("refresh: %w", err)
 			}
@@ -62,7 +63,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		msg := []byte("eddsa-2p-refresh")
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := EdDSA2PSign(ctx, sessions[idx], refreshed[idx], msg)
+			sig, err := EdDSA2PSign(ctx, jobs[idx], refreshed[idx], msg)
 			if err != nil {
 				return fmt.Errorf("sign: %w", err)
 			}
@@ -78,12 +79,14 @@ func TestProtocolGapCoverage(t *testing.T) {
 	t.Run("eddsa mp additive refresh", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(3)
+		partyNames := testPartyNames("protocol-gap/eddsa-mp-refresh", len(sessions))
+		jobs := jobsMP(sessions, partyNames)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		sidOuts := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, sidOut, err := EdDSAMPDKGAdditive(ctx, sessions[idx], CurveEd25519)
+			keyBlob, sidOut, err := EdDSAMPDKGAdditive(ctx, jobs[idx], CurveEd25519)
 			if err != nil {
 				return fmt.Errorf("dkg additive: %w", err)
 			}
@@ -106,7 +109,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		refreshed := make([][]byte, len(sessions))
 		refreshSIDOuts := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sidOut, keyBlob, err := EdDSAMPRefreshAdditive(ctx, sessions[idx], sidOuts[idx], keyBlobs[idx])
+			sidOut, keyBlob, err := EdDSAMPRefreshAdditive(ctx, jobs[idx], sidOuts[idx], keyBlobs[idx])
 			if err != nil {
 				return fmt.Errorf("refresh additive: %w", err)
 			}
@@ -132,7 +135,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		msg := []byte("eddsa-mp-refresh")
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := EdDSAMPSignAdditive(ctx, sessions[idx], refreshed[idx], msg, 0)
+			sig, err := EdDSAMPSignAdditive(ctx, jobs[idx], refreshed[idx], msg, 0)
 			if err != nil {
 				return fmt.Errorf("sign additive: %w", err)
 			}
@@ -148,11 +151,12 @@ func TestProtocolGapCoverage(t *testing.T) {
 	t.Run("schnorr 2p refresh and compressed key", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(2)
+		jobs := test2PJobs("protocol-gap/schnorr-2p-refresh", sessions)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := Schnorr2PDKG(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, err := Schnorr2PDKG(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg: %w", err)
 			}
@@ -175,7 +179,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 
 		refreshed := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, err := Schnorr2PRefresh(ctx, sessions[idx], keyBlobs[idx])
+			keyBlob, err := Schnorr2PRefresh(ctx, jobs[idx], keyBlobs[idx])
 			if err != nil {
 				return fmt.Errorf("refresh: %w", err)
 			}
@@ -199,7 +203,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		msgHash := sha256.Sum256([]byte("schnorr-2p-refresh"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := Schnorr2PSign(ctx, sessions[idx], refreshed[idx], msgHash[:])
+			sig, err := Schnorr2PSign(ctx, jobs[idx], refreshed[idx], msgHash[:])
 			if err != nil {
 				return fmt.Errorf("sign: %w", err)
 			}
@@ -214,12 +218,14 @@ func TestProtocolGapCoverage(t *testing.T) {
 	t.Run("schnorr mp additive refresh and compressed key", func(t *testing.T) {
 		ctx := testContext(t)
 		sessions := mpctest.NewMockNetwork(3)
+		partyNames := testPartyNames("protocol-gap/schnorr-mp-refresh", len(sessions))
+		jobs := jobsMP(sessions, partyNames)
 		t.Cleanup(func() { closeMockSessions(t, sessions) })
 
 		keyBlobs := make([][]byte, len(sessions))
 		sidOuts := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			keyBlob, sidOut, err := SchnorrMPDKGAdditive(ctx, sessions[idx], CurveSecp256k1)
+			keyBlob, sidOut, err := SchnorrMPDKGAdditive(ctx, jobs[idx], CurveSecp256k1)
 			if err != nil {
 				return fmt.Errorf("dkg additive: %w", err)
 			}
@@ -245,7 +251,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		refreshed := make([][]byte, len(sessions))
 		refreshSIDOuts := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sidOut, keyBlob, err := SchnorrMPRefreshAdditive(ctx, sessions[idx], sidOuts[idx], keyBlobs[idx])
+			sidOut, keyBlob, err := SchnorrMPRefreshAdditive(ctx, jobs[idx], sidOuts[idx], keyBlobs[idx])
 			if err != nil {
 				return fmt.Errorf("refresh additive: %w", err)
 			}
@@ -271,7 +277,7 @@ func TestProtocolGapCoverage(t *testing.T) {
 		msgHash := sha256.Sum256([]byte("schnorr-mp-refresh"))
 		sigs := make([][]byte, len(sessions))
 		runPerParty(t, sessions, func(idx int) error {
-			sig, err := SchnorrMPSignAdditive(ctx, sessions[idx], refreshed[idx], msgHash[:], 0)
+			sig, err := SchnorrMPSignAdditive(ctx, jobs[idx], refreshed[idx], msgHash[:], 0)
 			if err != nil {
 				return fmt.Errorf("sign additive: %w", err)
 			}

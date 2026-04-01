@@ -6,6 +6,6 @@ import (
 )
 
 var (
-	_ mpc.Session = (*mpctest.MockSession)(nil)
-	_ mpc.Session = (*mpctest.MaliciousSession)(nil)
+	_ mpc.Transport = (*mpctest.MockTransport)(nil)
+	_ mpc.Transport = (*mpctest.MaliciousTransport)(nil)
 )

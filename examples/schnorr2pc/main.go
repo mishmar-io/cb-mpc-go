@@ -17,7 +17,17 @@ func main() {
 	defer cancel()
 
 	// mpctest.NewMockNetwork is for local demos/tests only.
+	// This example runs both logical parties in one process for convenience.
+	// Use demos/ for process-isolated, production-like topologies.
 	sessions := mpctest.NewMockNetwork(2)
+	partyNames := []string{
+		"urn:uuid:2f4b567e-7d58-52c5-9c74-0d0c8b6a3e10",
+		"urn:uuid:7a1f5e4a-b8b4-5c67-a4cb-5777f284d64e",
+	}
+	jobs := []mpc.Job2P{
+		{Self: mpc.TwoPartyP1, P1Name: partyNames[0], P2Name: partyNames[1], Transport: sessions[0]},
+		{Self: mpc.TwoPartyP2, P1Name: partyNames[0], P2Name: partyNames[1], Transport: sessions[1]},
+	}
 	closeSessions := sync.OnceFunc(func() {
 		for _, session := range sessions {
 			_ = session.Close()
@@ -37,7 +47,7 @@ func main() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			keyBlob, err := mpc.Schnorr2PDKG(ctx, sessions[idx], mpc.CurveSecp256k1)
+			keyBlob, err := mpc.Schnorr2PDKG(ctx, jobs[idx], mpc.CurveSecp256k1)
 			if err != nil {
 				errCh <- fmt.Errorf("party %d dkg: %w", idx, err)
 				return
@@ -60,7 +70,7 @@ func main() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			sig, err := mpc.Schnorr2PSign(ctx, sessions[idx], keyBlobs[idx], msgHash[:])
+			sig, err := mpc.Schnorr2PSign(ctx, jobs[idx], keyBlobs[idx], msgHash[:])
 			if err != nil {
 				errCh <- fmt.Errorf("party %d sign: %w", idx, err)
 				return
@@ -82,5 +92,5 @@ func main() {
 
 	fmt.Printf("Schnorr-2PC sign complete\n")
 	fmt.Printf("x-only pubkey bytes: %d\n", len(xOnly))
-	fmt.Printf("signature sizes: party0=%d party1=%d\n", len(sigs[0]), len(sigs[1]))
+	fmt.Printf("signature sizes: p1=%d p2=%d\n", len(sigs[0]), len(sigs[1]))
 }
