@@ -53,6 +53,16 @@ The repository keeps:
 - `examples/` for zero-setup local runs
 - `demos/` for multi-process/networked demo workflows with extra setup such as PEM cert generation
 
+## Releases
+
+`cb-mpc-go` follows the same tag-driven release process as `cb-mpc`, adapted to
+this repository:
+
+- release tags remain beta/prerelease tags until the public Go API stabilizes; the first published tag is `v0.1.0-beta`
+- merge the release-related changes to `master` first, then push the version tag
+- pushing a version tag runs `.github/workflows/ci.yml`
+- the same tag also triggers `.github/workflows/make-release.yml`, which creates `cb-mpc-go-<tag>.tar.gz`, generates a provenance attestation, and opens a draft GitHub Release
+
 ## Licensing
 
 By submitting a contribution, you agree that your contributions will be licensed under the MIT License for this repository.

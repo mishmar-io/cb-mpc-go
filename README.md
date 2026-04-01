@@ -53,12 +53,17 @@ Project policies:
 
 ## Versioning And Compatibility
 
-- The first public release of this repository is intended to be tagged
-  `v0.1.0`.
+- The first published tag of this repository is the beta prerelease
+  `v0.1.0-beta`.
 - Before `v1`, breaking API changes may ship in minor releases when the wrapper
   needs to realign with the public `cb-mpc` C API.
+- While the wrapper remains beta, published tags may continue to use SemVer
+  prerelease suffixes such as `-beta` to make the stability level explicit.
 - Release notes should live in the GitHub Release for each published tag rather
   than in a checked-in changelog file.
+- Pushing a version tag runs the same tag-driven release flow used in
+  `cb-mpc`: the main CI runs for the tag, and GitHub Actions prepares a draft
+  GitHub Release with a source tarball and provenance attestation.
 - If you are consuming published tags rather than this repository directly,
   prefer matching the `cb-mpc-go` tag with the tested `cb-mpc` baseline instead
   of mixing versions opportunistically.
@@ -67,7 +72,7 @@ Current compatibility baseline:
 
 | `cb-mpc-go` | `cb-mpc` | Notes |
 | --- | --- | --- |
-| `v0.1.0` | `v0.2.1` | Uses only public install artifacts and follows the OpenSSL 3.6.1 flow required by `cb-mpc v0.2.1` |
+| `v0.1.0-beta` | `v0.2.1` | Uses only public install artifacts and follows the OpenSSL 3.6.1 flow required by `cb-mpc v0.2.1` |
 
 ## Build and Test
 
@@ -124,6 +129,12 @@ This module is published as:
 
 ```bash
 go get github.com/coinbase/cb-mpc-go
+```
+
+To pin the current beta release explicitly:
+
+```bash
+go get github.com/coinbase/cb-mpc-go@v0.1.0-beta
 ```
 
 `cb-mpc-go` is a CGO wrapper, not a pure-Go package. Consumers must make the
