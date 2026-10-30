@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 )
 
 var (

@@ -3,7 +3,7 @@ package mpc
 import (
 	"math"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 )
 
 func toCGOTwoPartySelf(self TwoPartySelf) (cinterop.TwoPartySelf, error) {

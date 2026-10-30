@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	democommon "github.com/coinbase/cb-mpc-go/demos/common"
-	"github.com/coinbase/cb-mpc-go/pkg/mpc"
+	democommon "github.com/mishmar-io/cb-mpc-go/demos/common"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpc"
 )
 
 const (

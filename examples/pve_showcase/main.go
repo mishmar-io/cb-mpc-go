@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpc"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpc"
 )
 
 func main() {

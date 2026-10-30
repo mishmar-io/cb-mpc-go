@@ -3,7 +3,7 @@ package mpc
 import (
 	"context"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 )
 
 // TDH2DKGAdditive performs multi-party distributed key generation for TDH2

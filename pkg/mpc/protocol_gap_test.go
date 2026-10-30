@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func TestProtocolGapCoverage(t *testing.T) {

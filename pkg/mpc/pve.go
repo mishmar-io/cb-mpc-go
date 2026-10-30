@@ -1,6 +1,6 @@
 package mpc
 
-import cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+import cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 
 // PVEBasePKECallbacks provides encrypt/decrypt hooks for the base public-key encryption scheme used by PVE.
 type PVEBasePKECallbacks = cinterop.PVEBasePKECallbacks

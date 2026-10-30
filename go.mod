@@ -1,4 +1,4 @@
-module github.com/coinbase/cb-mpc-go
+module github.com/mishmar-io/cb-mpc-go
 
 go 1.25.8
 

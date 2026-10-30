@@ -3,7 +3,7 @@ package mpc
 import (
 	"context"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 )
 
 // EdDSA2PDKG performs two-party distributed key generation for EdDSA on the given curve.

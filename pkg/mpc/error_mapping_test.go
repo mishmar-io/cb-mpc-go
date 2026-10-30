@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func TestWrapPublicError_InvalidCurveIsInvalidParameter(t *testing.T) {

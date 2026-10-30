@@ -3,7 +3,7 @@ package mpc
 import (
 	"context"
 
-	cinterop "github.com/coinbase/cb-mpc-go/internal/cgo"
+	cinterop "github.com/mishmar-io/cb-mpc-go/internal/cgo"
 )
 
 // ECDSA2PDKG performs two-party distributed key generation for ECDSA on the given curve.
@@ -42,6 +42,34 @@ func ECDSA2PSign(ctx context.Context, job Job2P, keyBlob []byte, msgHash []byte,
 	}
 	sidOut, sigDER, err = cinterop.ECDSA2PSign(ctx, cgoJob, keyBlob, msgHash, sidIn)
 	return wrapResult2("ECDSA2PSign", sidOut, sigDER, err)
+}
+
+// ECDSA2PPresign runs messages 1 to 3 of the signing protocol for n nonces
+// before any message is known, and returns the session ID used plus this
+// party's presig blob, which is as secret as the key blob. One slot signs one
+// message: discard a slot after its first use, whatever the outcome.
+func ECDSA2PPresign(ctx context.Context, job Job2P, keyBlob []byte, n int, sidIn []byte) (sidOut []byte, presigBlob []byte, err error) {
+	cgoJob, err := toCGOJob2P(job)
+	if err != nil {
+		return nil, nil, wrapPublicError("ECDSA2PPresign", err)
+	}
+	sidOut, presigBlob, err = cinterop.ECDSA2PPresign(ctx, cgoJob, keyBlob, n, sidIn)
+	return wrapResult2("ECDSA2PPresign", sidOut, presigBlob, err)
+}
+
+// ECDSA2PPresignComplete is P2's message 4 for one slot of a presig and a
+// message hash, computed without a counterparty, to send to P1.
+func ECDSA2PPresignComplete(keyBlob []byte, presigBlob []byte, index int, msgHash []byte) ([]byte, error) {
+	msg4, err := cinterop.ECDSA2PPresignComplete(keyBlob, presigBlob, index, msgHash)
+	return wrapResult1("ECDSA2PPresignComplete", msg4, err)
+}
+
+// ECDSA2PPresignFinish is P1's output step for one slot: it verifies P2's
+// message 4 against the message hash and returns the DER signature, or an
+// error and no signature.
+func ECDSA2PPresignFinish(keyBlob []byte, presigBlob []byte, index int, msgHash []byte, msg4 []byte) ([]byte, error) {
+	sigDER, err := cinterop.ECDSA2PPresignFinish(keyBlob, presigBlob, index, msgHash, msg4)
+	return wrapResult1("ECDSA2PPresignFinish", sigDER, err)
 }
 
 // ECDSA2PGetPublicKeyCompressed extracts the compressed joint public key from a two-party ECDSA key blob.

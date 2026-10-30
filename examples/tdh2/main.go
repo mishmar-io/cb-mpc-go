@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpc"
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpc"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func main() {

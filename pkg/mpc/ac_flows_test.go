@@ -10,7 +10,7 @@ import (
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	secp256k1ecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func TestECDSAMPACFlow(t *testing.T) {

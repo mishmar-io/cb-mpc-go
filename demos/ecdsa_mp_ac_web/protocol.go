@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpc"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpc"
 )
 
 func buildWorkflowAccess(workflow *workflowState) (*mpc.AccessStructure, error) {

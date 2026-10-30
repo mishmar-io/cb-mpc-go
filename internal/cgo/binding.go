@@ -1754,6 +1754,56 @@ func ECDSA2PSign(ctx context.Context, job Job2P, keyBlob []byte, msgHash []byte,
 	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(sigOut), nil
 }
 
+func ECDSA2PPresign(ctx context.Context, job Job2P, keyBlob []byte, n int, sidIn []byte) ([]byte, []byte, error) {
+	var sidOut C.cmem_t
+	var presigOut C.cmem_t
+	mems, cleanup, err := bytesToOwnedCmems(keyBlob, sidIn)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cleanup()
+	keyBlobMem := mems[0]
+	sidInMem := mems[1]
+
+	err = with2PCJob(ctx, job, func(jobPtr *C.cbmpc_2pc_job_t) error {
+		return codeError("cbmpc_ecdsa_2p_presign", C.cbmpc_ecdsa_2p_presign(jobPtr, keyBlobMem, C.int32_t(n), sidInMem, &sidOut, &presigOut))
+	})
+	if err != nil {
+		freeCmem(sidOut)
+		freeCmem(presigOut)
+		return nil, nil, err
+	}
+	return cmemToBytesAndFree(sidOut), cmemToBytesAndFree(presigOut), nil
+}
+
+func ECDSA2PPresignComplete(keyBlob []byte, presigBlob []byte, index int, msgHash []byte) ([]byte, error) {
+	mems, cleanup, err := bytesToOwnedCmems(keyBlob, presigBlob, msgHash)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	var out C.cmem_t
+	if err := codeError("cbmpc_ecdsa_2p_presign_complete", C.cbmpc_ecdsa_2p_presign_complete(mems[0], mems[1], C.int32_t(index), mems[2], &out)); err != nil {
+		freeCmem(out)
+		return nil, err
+	}
+	return cmemToBytesAndFree(out), nil
+}
+
+func ECDSA2PPresignFinish(keyBlob []byte, presigBlob []byte, index int, msgHash []byte, msg4 []byte) ([]byte, error) {
+	mems, cleanup, err := bytesToOwnedCmems(keyBlob, presigBlob, msgHash, msg4)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	var out C.cmem_t
+	if err := codeError("cbmpc_ecdsa_2p_presign_finish", C.cbmpc_ecdsa_2p_presign_finish(mems[0], mems[1], C.int32_t(index), mems[2], mems[3], &out)); err != nil {
+		freeCmem(out)
+		return nil, err
+	}
+	return cmemToBytesAndFree(out), nil
+}
+
 func ECDSA2PGetPublicKeyCompressed(keyBlob []byte) ([]byte, error) {
 	in, cleanup, err := bytesToOwnedCmem(keyBlob)
 	if err != nil {

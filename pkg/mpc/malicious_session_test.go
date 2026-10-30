@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func TestMaliciousTransport_BehaviorIsolation(t *testing.T) {

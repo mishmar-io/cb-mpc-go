@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/coinbase/cb-mpc-go/pkg/mpctest"
+	"github.com/mishmar-io/cb-mpc-go/pkg/mpctest"
 )
 
 func TestHelperAPIs(t *testing.T) {
